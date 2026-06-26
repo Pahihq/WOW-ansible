@@ -17,6 +17,7 @@
     vmagent_conf_dir: /opt/monitoring/vmagent/conf.d
     node_exporter_textfile_dir: /var/lib/node_exporter/textfile_collector
     speedtest_metrics_script: /usr/local/bin/speedtest_metrics.sh
+    speedtest_metrics_provider: "{{ speedtest_provider | default('ookla') }}"
     node_exporter_install_tmp: /tmp/node_exporter_install
     vmagent_install_tmp: /tmp/vmagent_install
 
@@ -102,6 +103,7 @@
           - btop
           - iotop
           - jq
+          - python3-requests
         state: present
         update_cache: true
 
@@ -133,8 +135,8 @@
         mode: "0755"
 
     - name: Create speedtest metrics systemd service
-      ansible.builtin.copy:
-        src: files/speedtest-metrics.service
+      ansible.builtin.template:
+        src: templates/speedtest-metrics.service.j2
         dest: /etc/systemd/system/speedtest-metrics.service
         owner: root
         group: root

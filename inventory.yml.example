@@ -22,4 +22,5 @@ all:
           ansible_host: 203.0.113.20
           ansible_user: root
           monitoring_instance_name: node_01
+          speedtest_provider: yandex
           domain: node-01.example.com

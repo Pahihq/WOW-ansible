@@ -14,3 +14,9 @@ ansible-playbook -i inventory.yml playbook/site.yml
 - `playbook/reporting.yml` - собирает данные inventory/speedtest и обновляет Google Sheets.
 
 Используй `inventory.yml.example` как шаблон для локального `inventory.yml`.
+
+Для RU-ноды можно переключить сбор speedtest-метрик на Яндекс:
+
+```yaml
+speedtest_provider: yandex
+```
