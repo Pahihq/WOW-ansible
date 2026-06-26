@@ -1,0 +1,15 @@
+[Unit]
+Description=Node Exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=root
+Group=root
+Type=simple
+ExecStart={{ nodeexporter_dir }}/node_exporter --web.listen-address=127.0.0.1:9100 --collector.textfile.directory={{ node_exporter_textfile_dir }}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

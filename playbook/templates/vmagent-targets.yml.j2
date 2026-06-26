@@ -1,0 +1,6 @@
+- job_name: {{ vmagent_job_name }}
+  scrape_interval: 15s
+  static_configs:
+    - targets: ['{{ vmagent_target }}']
+      labels:
+        instance: "{{ monitoring_instance_name }}"

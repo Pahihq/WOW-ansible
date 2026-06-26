@@ -17,6 +17,40 @@
     vmagent_conf_dir: /opt/monitoring/vmagent/conf.d
     node_exporter_textfile_dir: /var/lib/node_exporter/textfile_collector
     speedtest_metrics_script: /usr/local/bin/speedtest_metrics.sh
+    node_exporter_install_tmp: /tmp/node_exporter_install
+    vmagent_install_tmp: /tmp/vmagent_install
+
+    monitoring_services:
+      - cadvisor
+      - nodeexporter
+      - vmagent
+      - speedtest-metrics.timer
+
+    monitoring_restart_services:
+      - cadvisor
+      - nodeexporter
+      - vmagent
+
+    vmagent_scrape_targets:
+      - name: cAdvisor
+        job_name: integrations/cAdvisor
+        target: localhost:9101
+        dest: "{{ vmagent_conf_dir }}/cadvisor.yml"
+      - name: node_exporter
+        job_name: integrations/node_exporter
+        target: localhost:9100
+        dest: "{{ vmagent_conf_dir }}/nodeexporter.yml"
+
+    monitoring_systemd_units:
+      - name: cAdvisor
+        src: templates/cadvisor.service.j2
+        dest: /etc/systemd/system/cadvisor.service
+      - name: node_exporter
+        src: templates/nodeexporter.service.j2
+        dest: /etc/systemd/system/nodeexporter.service
+      - name: vmagent
+        src: templates/vmagent.service.j2
+        dest: /etc/systemd/system/vmagent.service
 
     cadvisor_url: "https://github.com/google/cadvisor/releases/download/v{{ cadvisor_version }}/cadvisor-v{{ cadvisor_version }}-linux-amd64"
     node_exporter_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
@@ -53,13 +87,10 @@
         fail_msg: "Put vmagent remote write URL, username, and password into {{ vmagent_secrets_file }}"
 
   tasks:
-    - name: Show instance name
-      debug:
-        msg: "{{ monitoring_instance_name }}"
-
     - name: Set hostname from monitoring instance name
       ansible.builtin.hostname:
         name: "{{ monitoring_instance_name | lower | regex_replace('_', '-') }}"
+
     - name: Install required packages
       ansible.builtin.apt:
         name:
@@ -142,12 +173,12 @@
 
     - name: Create temporary node_exporter install directory
       ansible.builtin.file:
-        path: /tmp/node_exporter_install
+        path: "{{ node_exporter_install_tmp }}"
         state: absent
 
     - name: Recreate temporary node_exporter install directory
       ansible.builtin.file:
-        path: /tmp/node_exporter_install
+        path: "{{ node_exporter_install_tmp }}"
         state: directory
         owner: root
         group: root
@@ -156,12 +187,12 @@
     - name: Download and unpack node_exporter
       ansible.builtin.unarchive:
         src: "{{ node_exporter_url }}"
-        dest: /tmp/node_exporter_install
+        dest: "{{ node_exporter_install_tmp }}"
         remote_src: true
 
     - name: Install node_exporter binary
       ansible.builtin.copy:
-        src: "/tmp/node_exporter_install/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        src: "{{ node_exporter_install_tmp }}/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
         dest: "{{ nodeexporter_dir }}/node_exporter"
         owner: root
         group: root
@@ -172,7 +203,7 @@
 
     - name: Remove temporary node_exporter files
       ansible.builtin.file:
-        path: /tmp/node_exporter_install
+        path: "{{ node_exporter_install_tmp }}"
         state: absent
 
     # =========================
@@ -181,12 +212,12 @@
 
     - name: Remove temporary vmagent install directory
       ansible.builtin.file:
-        path: /tmp/vmagent_install
+        path: "{{ vmagent_install_tmp }}"
         state: absent
 
     - name: Create temporary vmagent install directory
       ansible.builtin.file:
-        path: /tmp/vmagent_install
+        path: "{{ vmagent_install_tmp }}"
         state: directory
         owner: root
         group: root
@@ -195,12 +226,12 @@
     - name: Download and unpack vmutils
       ansible.builtin.unarchive:
         src: "{{ vmagent_url }}"
-        dest: /tmp/vmagent_install
+        dest: "{{ vmagent_install_tmp }}"
         remote_src: true
 
     - name: Install vmagent binary
       ansible.builtin.copy:
-        src: /tmp/vmagent_install/vmagent-prod
+        src: "{{ vmagent_install_tmp }}/vmagent-prod"
         dest: "{{ vmagent_dir }}/vmagent"
         owner: root
         group: root
@@ -211,7 +242,7 @@
 
     - name: Remove temporary vmagent files
       ansible.builtin.file:
-        path: /tmp/vmagent_install
+        path: "{{ vmagent_install_tmp }}"
         state: absent
 
     # =========================
@@ -219,49 +250,28 @@
     # =========================
 
     - name: Create vmagent main scrape config
-      ansible.builtin.copy:
+      ansible.builtin.template:
+        src: templates/vmagent-scrape.yml.j2
         dest: "{{ vmagent_dir }}/scrape.yml"
         owner: root
         group: root
         mode: "0644"
-        content: |
-          scrape_config_files:
-            - "{{ vmagent_conf_dir }}/*.yml"
-
-          global:
-            scrape_interval: 15s
       notify:
         - Restart vmagent
 
-    - name: Create cAdvisor scrape config
-      ansible.builtin.copy:
-        dest: "{{ vmagent_conf_dir }}/cadvisor.yml"
+    - name: Create vmagent target scrape configs
+      ansible.builtin.template:
+        src: templates/vmagent-targets.yml.j2
+        dest: "{{ item.dest }}"
         owner: root
         group: root
         mode: "0644"
-        content: |
-          - job_name: integrations/cAdvisor
-            scrape_interval: 15s
-            static_configs:
-              - targets: ['localhost:9101']
-                labels:
-                  instance: "{{ monitoring_instance_name }}"
-      notify:
-        - Restart vmagent
-
-    - name: Create node_exporter scrape config
-      ansible.builtin.copy:
-        dest: "{{ vmagent_conf_dir }}/nodeexporter.yml"
-        owner: root
-        group: root
-        mode: "0644"
-        content: |
-          - job_name: integrations/node_exporter
-            scrape_interval: 15s
-            static_configs:
-              - targets: ['localhost:9100']
-                labels:
-                  instance: "{{ monitoring_instance_name }}"
+      vars:
+        vmagent_job_name: "{{ item.job_name }}"
+        vmagent_target: "{{ item.target }}"
+      loop: "{{ vmagent_scrape_targets }}"
+      loop_control:
+        label: "{{ item.name }}"
       notify:
         - Restart vmagent
 
@@ -269,94 +279,20 @@
     # systemd units
     # =========================
 
-    - name: Create cAdvisor systemd unit
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/cadvisor.service
+    - name: Create monitoring systemd units
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
         owner: root
         group: root
         mode: "0644"
-        content: |
-          [Unit]
-          Description=cAdvisor
-          Wants=network-online.target
-          After=network-online.target
-
-          [Service]
-          User=root
-          Group=root
-          Type=simple
-          ExecStart={{ cadvisor_dir }}/cadvisor \
-                  -listen_ip=127.0.0.1 \
-                  -logtostderr \
-                  -port=9101 \
-                  -docker_only=true
-          Restart=always
-          RestartSec=5
-
-          [Install]
-          WantedBy=multi-user.target
-      notify:
-        - Reload systemd
-        - Restart cadvisor
-
-    - name: Create node_exporter systemd unit
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/nodeexporter.service
-        owner: root
-        group: root
-        mode: "0644"
-        content: |
-          [Unit]
-          Description=Node Exporter
-          Wants=network-online.target
-          After=network-online.target
-
-          [Service]
-          User=root
-          Group=root
-          Type=simple
-          ExecStart=/opt/monitoring/nodeexporter/node_exporter --web.listen-address=127.0.0.1:9100 --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
-          Restart=always
-          RestartSec=5
-
-          [Install]
-          WantedBy=multi-user.target
-      notify:
-        - Reload systemd
-        - Restart nodeexporter
-
-    - name: Create vmagent systemd unit
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/vmagent.service
-        owner: root
-        group: root
-        mode: "0644"
-        content: |
-          [Unit]
-          Description=VictoriaMetrics Agent
-          Wants=network-online.target
-          After=network-online.target
-
-          [Service]
-          User=root
-          Group=root
-          Type=simple
-          ExecStart=/opt/monitoring/vmagent/vmagent \
-            -httpListenAddr=127.0.0.1:8429 \
-            -promscrape.config=/opt/monitoring/vmagent/scrape.yml \
-            -promscrape.configCheckInterval=60s \
-            -remoteWrite.url={{ vmagent_remote_write_url }} \
-            -remoteWrite.basicAuth.username={{ vmagent_remote_write_username }} \
-            -remoteWrite.basicAuth.password={{ vmagent_remote_write_password }}
-          Restart=always
-          RestartSec=5
-
-          [Install]
-          WantedBy=multi-user.target
       no_log: true
+      loop: "{{ monitoring_systemd_units }}"
+      loop_control:
+        label: "{{ item.name }}"
       notify:
         - Reload systemd
-        - Restart vmagent
+        - Restart changed monitoring services
 
     - name: Force systemd reload before enabling services
       ansible.builtin.systemd:
@@ -367,27 +303,7 @@
         name: "{{ item }}"
         enabled: true
         state: started
-      loop:
-        - cadvisor
-        - nodeexporter
-        - vmagent
-        - speedtest-metrics.timer
-
-    - name: Check monitoring services status
-      ansible.builtin.command: "systemctl is-active {{ item }}"
-      loop:
-        - cadvisor
-        - nodeexporter
-        - vmagent
-        - speedtest-metrics.timer
-      register: monitoring_status
-      changed_when: false
-      failed_when: false
-
-    - name: Show monitoring services status
-      ansible.builtin.debug:
-        msg: "{{ item.item }}: {{ item.stdout }}"
-      loop: "{{ monitoring_status.results }}"
+      loop: "{{ monitoring_services }}"
 
   handlers:
     - name: Reload systemd
@@ -414,3 +330,11 @@
         state: restarted
         enabled: true
         daemon_reload: true
+
+    - name: Restart changed monitoring services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+        enabled: true
+        daemon_reload: true
+      loop: "{{ monitoring_restart_services }}"

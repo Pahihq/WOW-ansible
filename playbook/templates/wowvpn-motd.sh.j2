@@ -1,0 +1,40 @@
+#!/bin/bash
+
+C="\e[38;2;42;231;246m"
+R="\e[0m"
+W="\e[38;2;255;255;255m"
+G="\e[38;2;120;120;120m"
+RED="\e[38;2;255;80;80m"
+
+HOST=$(hostname)
+IP=$(hostname -I | awk '{print $1}')
+UPTIME=$(uptime -p | sed 's/up //')
+RAM=$(free -h | awk '/Mem:/ {print $3 " / " $2}')
+LOAD=$(uptime | awk -F'load average:' '{ print $2 }')
+
+echo ""
+echo -e "${C}"
+echo "██╗    ██╗ ██████╗ ██╗    ██╗██╗   ██╗██████╗ ███╗   ██╗"
+echo "██║    ██║██╔═══██╗██║    ██║██║   ██║██╔══██╗████╗  ██║"
+echo "██║ █╗ ██║██║   ██║██║ █╗ ██║██║   ██║██████╔╝██╔██╗ ██║"
+echo "██║███╗██║██║   ██║██║███╗██║╚██╗ ██╔╝██╔═══╝ ██║╚██╗██║"
+echo "╚███╔███╔╝╚██████╔╝╚███╔███╔╝ ╚████╔╝ ██║     ██║ ╚████║"
+echo " ╚══╝╚══╝  ╚═════╝  ╚══╝╚══╝   ╚═══╝  ╚═╝     ╚═╝  ╚═══╝"
+echo -e "${R}"
+
+echo -e "${G}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${R}"
+
+echo -e "${C}󰒋 HOST${R}      ${W}$HOST${R}"
+echo -e "${C}󰩟 IP${R}        ${W}$IP${R}"
+echo -e "${C}󰅐 UPTIME${R}    ${W}$UPTIME${R}"
+echo -e "${C}󰍛 RAM${R}       ${W}$RAM${R}"
+echo -e "${C}󰓅 LOAD${R}      ${W}$LOAD${R}"
+
+echo ""
+
+echo -e "${RED}⚠ WARNING${R}  Unauthorized access prohibited"
+echo -e "${C}⚡ All connections are monitored and logged${R}"
+
+echo -e "${G}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${R}"
+
+echo ""

@@ -1,0 +1,549 @@
+---
+- name: Update Linux hosts without reboot
+  hosts: all
+  become: true
+  gather_facts: true
+  serial: "20%"
+
+  vars:
+    apt_upgrade_mode: safe
+
+  pre_tasks:
+    - name: Refuse unsupported OS family
+      ansible.builtin.fail:
+        msg: "Unsupported OS family: {{ ansible_facts.os_family }}"
+      when: ansible_facts.os_family not in ["Debian", "RedHat"]
+
+  tasks:
+    - name: Debian/Ubuntu | Update apt cache and upgrade packages without reboot
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        upgrade: "{{ apt_upgrade_mode }}"
+        dpkg_options: "force-confdef,force-confold"
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_SUSPEND: "1"
+      when: ansible_facts.os_family == "Debian"
+
+    - name: RHEL/Rocky/Alma/Fedora | Upgrade installed packages without reboot
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_cache: true
+        update_only: true
+      when: ansible_facts.os_family == "RedHat"
+
+    - name: Debian/Ubuntu | Check whether reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: debian_reboot_required
+      changed_when: false
+      when: ansible_facts.os_family == "Debian"
+
+    - name: RHEL-like | Check whether reboot is required if needs-restarting exists
+      ansible.builtin.command: needs-restarting -r
+      register: rhel_reboot_required
+      changed_when: false
+      failed_when: false
+      when: ansible_facts.os_family == "RedHat"
+
+    - name: Report reboot requirement, but do not reboot
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} updated.
+          Reboot required:
+          {{
+            (
+              ansible_facts.os_family == "Debian"
+              and debian_reboot_required.stat.exists | default(false)
+            )
+            or
+            (
+              ansible_facts.os_family == "RedHat"
+              and rhel_reboot_required.rc | default(0) == 1
+            )
+          }}
+
+- name: Install and configure zsh with oh-my-zsh and powerlevel10k
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    # Можно переопределить при запуске:
+    # ansible-playbook bootstrap.yml -e zsh_user=root
+    zsh_target_user: "{{ zsh_user | default(ansible_user) }}"
+
+    zshrc_source_file: "files/.zshrc"
+    p10k_source_file: "files/.p10k.zsh"
+
+    zsh_packages:
+      - zsh
+      - git
+      - curl
+
+    p10k_themes:
+      - name: Arctic Blue
+        ok_background: 33
+        error_background: 160
+      - name: Emerald Night
+        ok_background: 29
+        error_background: 160
+      - name: Purple Void
+        ok_background: 99
+        error_background: 161
+      - name: Rose Neon
+        ok_background: 168
+        error_background: 197
+      - name: Sunset Orange
+        ok_background: 208
+        error_background: 196
+      - name: Crimson Steel
+        ok_background: 124
+        error_background: 196
+      - name: Graphite Cyan
+        ok_background: 24
+        error_background: 160
+      - name: Nord Frost
+        ok_background: 67
+        error_background: 203
+      - name: Tokyo Storm
+        ok_background: 111
+        error_background: 204
+      - name: Deep Ocean
+        ok_background: 31
+        error_background: 160
+      - name: Forest Moss
+        ok_background: 64
+        error_background: 167
+      - name: Golden Hour
+        ok_background: 178
+        error_background: 160
+      - name: Lavender Mist
+        ok_background: 140
+        error_background: 197
+      - name: Cyber Lime
+        ok_background: 76
+        error_background: 196
+      - name: Ruby Wine
+        ok_background: 89
+        error_background: 196
+
+    zsh_git_components:
+      - name: powerlevel10k theme
+        repo: https://github.com/romkatv/powerlevel10k.git
+        dest: "{{ zsh_target_home }}/.oh-my-zsh/custom/themes/powerlevel10k"
+      - name: zsh-syntax-highlighting plugin
+        repo: https://github.com/zsh-users/zsh-syntax-highlighting.git
+        dest: "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting"
+      - name: zsh-autosuggestions plugin
+        repo: https://github.com/zsh-users/zsh-autosuggestions.git
+        dest: "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
+
+  pre_tasks:
+    - name: Read target user account data
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ zsh_target_user }}"
+
+    - name: Save target user paths
+      ansible.builtin.set_fact:
+        zsh_target_gid: "{{ getent_passwd[zsh_target_user][2] }}"
+        zsh_target_home: "{{ getent_passwd[zsh_target_user][4] }}"
+
+    - name: Select stable p10k theme by hostname
+      ansible.builtin.set_fact:
+        p10k_theme: "{{ p10k_themes[(inventory_hostname | hash('md5') | int(base=16)) % (p10k_themes | length)] }}"
+
+  tasks:
+    - name: Install required packages
+      ansible.builtin.package:
+        name: "{{ zsh_packages }}"
+        state: present
+
+    - name: Find zsh binary
+      ansible.builtin.shell: command -v zsh
+      register: zsh_binary
+      changed_when: false
+
+    - name: Add zsh to /etc/shells
+      ansible.builtin.lineinfile:
+        path: /etc/shells
+        line: "{{ zsh_binary.stdout }}"
+        state: present
+        create: true
+        mode: "0644"
+
+    - name: Check existing oh-my-zsh directory
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.oh-my-zsh"
+      register: ohmyzsh_dir
+
+    - name: Check existing oh-my-zsh git repository
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.oh-my-zsh/.git"
+      register: ohmyzsh_git
+
+    - name: Install oh-my-zsh if missing
+      ansible.builtin.git:
+        repo: https://github.com/ohmyzsh/ohmyzsh.git
+        dest: "{{ zsh_target_home }}/.oh-my-zsh"
+        version: master
+        depth: 1
+        update: false
+        force: false
+      when: not ohmyzsh_dir.stat.exists
+
+    - name: Skip existing non-git oh-my-zsh directory
+      ansible.builtin.debug:
+        msg: "oh-my-zsh already exists and is not a git repo, not overwriting: {{ zsh_target_home }}/.oh-my-zsh"
+      when:
+        - ohmyzsh_dir.stat.exists
+        - not ohmyzsh_git.stat.exists
+
+    - name: Ensure oh-my-zsh custom directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0755"
+      loop:
+        - "{{ zsh_target_home }}/.oh-my-zsh/custom/themes"
+        - "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins"
+
+    - name: Check existing zsh git components
+      ansible.builtin.stat:
+        path: "{{ item.dest }}"
+      loop: "{{ zsh_git_components }}"
+      register: zsh_git_component_stats
+
+    - name: Install missing zsh git components
+      ansible.builtin.git:
+        repo: "{{ item.item.repo }}"
+        dest: "{{ item.item.dest }}"
+        version: master
+        depth: 1
+        update: false
+        force: false
+      loop: "{{ zsh_git_component_stats.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: not item.stat.exists
+
+    - name: Check existing .zshrc
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.zshrc"
+      register: zshrc_file
+
+    - name: Copy .zshrc if missing
+      ansible.builtin.copy:
+        src: "{{ zshrc_source_file }}"
+        dest: "{{ zsh_target_home }}/.zshrc"
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+      when: not zshrc_file.stat.exists
+
+    - name: Set powerlevel10k theme in .zshrc
+      ansible.builtin.lineinfile:
+        path: "{{ zsh_target_home }}/.zshrc"
+        regexp: '^ZSH_THEME='
+        line: 'ZSH_THEME="powerlevel10k/powerlevel10k"'
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+
+    - name: Check existing .p10k.zsh
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.p10k.zsh"
+      register: p10k_file
+
+    - name: Copy .p10k.zsh if missing
+      ansible.builtin.copy:
+        src: "{{ p10k_source_file }}"
+        dest: "{{ zsh_target_home }}/.p10k.zsh"
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+      when: not p10k_file.stat.exists
+
+    - name: Apply selected p10k host theme colors
+      ansible.builtin.blockinfile:
+        path: "{{ zsh_target_home }}/.p10k.zsh"
+        marker: "# {mark} ANSIBLE MANAGED P10K HOST THEME"
+        insertafter: EOF
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+        block: |
+          # Theme: {{ p10k_theme.name }}
+          # Host: {{ inventory_hostname }}
+
+          typeset -g POWERLEVEL9K_OS_ICON_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_DIR_BACKGROUND={{ p10k_theme.ok_background }}
+
+          typeset -g POWERLEVEL9K_VCS_CLEAN_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_VCS_MODIFIED_BACKGROUND={{ p10k_theme.error_background }}
+          typeset -g POWERLEVEL9K_VCS_UNTRACKED_BACKGROUND={{ p10k_theme.error_background }}
+
+          typeset -g POWERLEVEL9K_STATUS_OK_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_STATUS_ERROR_BACKGROUND={{ p10k_theme.error_background }}
+
+          typeset -g POWERLEVEL9K_COMMAND_EXECUTION_TIME_BACKGROUND={{ p10k_theme.ok_background }}
+
+          typeset -g POWERLEVEL9K_CONTEXT_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_CONTEXT_ROOT_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_CONTEXT_ROOT_FOREGROUND=15
+
+          typeset -g POWERLEVEL9K_PROMPT_CHAR_OK_VIINS_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_PROMPT_CHAR_OK_VICMD_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VIINS_BACKGROUND={{ p10k_theme.error_background }}
+          typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VICMD_BACKGROUND={{ p10k_theme.error_background }}
+
+    - name: Source .p10k.zsh from .zshrc
+      ansible.builtin.lineinfile:
+        path: "{{ zsh_target_home }}/.zshrc"
+        line: '[[ ! -f "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"'
+        state: present
+        insertafter: EOF
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+
+    - name: Set zsh as default shell
+      ansible.builtin.user:
+        name: "{{ zsh_target_user }}"
+        shell: "{{ zsh_binary.stdout }}"
+
+    - name: Fix oh-my-zsh ownership
+      ansible.builtin.file:
+        path: "{{ zsh_target_home }}/.oh-my-zsh"
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        recurse: true
+
+    - name: Fix config files ownership
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+      loop:
+        - "{{ zsh_target_home }}/.zshrc"
+        - "{{ zsh_target_home }}/.p10k.zsh"
+
+    - name: Show selected theme
+      ansible.builtin.debug:
+        msg: "Selected p10k theme for {{ inventory_hostname }}: {{ p10k_theme.name }}"
+
+- name: Configure WOWVPN neon SSH MOTD and SSH authentication
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    sshd_config_path: /etc/ssh/sshd_config
+    ssh_motd_script: /etc/update-motd.d/99-WOWVPN
+    root_authorized_keys_file: "{{ playbook_dir }}/secrets/root_authorized_keys.pub"
+
+  pre_tasks:
+    - name: Check root authorized key file on controller
+      ansible.builtin.stat:
+        path: "{{ root_authorized_keys_file }}"
+      delegate_to: localhost
+      become: false
+      register: root_authorized_keys_file_stat
+
+    - name: Read root authorized key from controller file
+      ansible.builtin.set_fact:
+        root_authorized_key: "{{ lookup('ansible.builtin.file', root_authorized_keys_file) | trim }}"
+      delegate_to: localhost
+      become: false
+      when: root_authorized_keys_file_stat.stat.exists
+
+    - name: Validate root authorized key
+      ansible.builtin.assert:
+        that:
+          - root_authorized_keys_file_stat.stat.exists
+          - root_authorized_key is defined
+          - root_authorized_key | length > 0
+        fail_msg: "Put root SSH public key into {{ root_authorized_keys_file }}"
+
+  tasks:
+    - name: Check update-motd directory
+      ansible.builtin.stat:
+        path: /etc/update-motd.d
+      register: update_motd_dir
+
+    - name: Find executable default Debian MOTD scripts
+      ansible.builtin.find:
+        paths: /etc/update-motd.d
+        file_type: file
+        excludes:
+          - "{{ ssh_motd_script | basename }}"
+      register: default_motd_scripts
+      when: update_motd_dir.stat.isdir | default(false)
+
+    - name: Disable executable default Debian MOTD scripts if needed
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        mode: "0644"
+      loop: "{{ default_motd_scripts.files | default([]) }}"
+      when:
+        - item.mode is defined
+        - (item.mode[-3:] | regex_search('[1357]')) is not none
+
+    - name: Create WOWVPN neon MOTD
+      ansible.builtin.template:
+        src: templates/wowvpn-motd.sh.j2
+        dest: "{{ ssh_motd_script }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Find extra sshd config files
+      ansible.builtin.find:
+        paths: /etc/ssh/sshd_config.d
+        patterns: "*.conf"
+        file_type: file
+      register: sshd_extra_configs
+      failed_when: false
+
+    - name: Read extra sshd config files
+      ansible.builtin.slurp:
+        src: "{{ item.path }}"
+      loop: "{{ sshd_extra_configs.files | default([]) }}"
+      register: sshd_extra_config_contents
+      when: sshd_extra_configs.matched | default(0) | int > 0
+
+    - name: Remove only truly conflicting sshd config snippets
+      ansible.builtin.file:
+        path: "{{ item.source }}"
+        state: absent
+      loop: "{{ sshd_extra_config_contents.results | default([]) }}"
+      when: >
+        item.content is defined and
+        (
+          (item.content | b64decode) is search('(?im)^\\s*PasswordAuthentication\\s+no\\s*$')
+          or (item.content | b64decode) is search('(?im)^\\s*PubkeyAuthentication\\s+no\\s*$')
+          or (item.content | b64decode) is search('(?im)^\\s*PermitRootLogin\\s+(no|prohibit-password|without-password)\\s*$')
+          or (item.content | b64decode) is search('(?im)^\\s*AuthenticationMethods\\s+.*$')
+        )
+      notify: Restart ssh service
+
+    - name: Remove old SSH authentication directives from main config
+      ansible.builtin.lineinfile:
+        path: "{{ sshd_config_path }}"
+        regexp: "{{ item }}"
+        state: absent
+        backup: true
+      loop:
+        - '^\s*PermitRootLogin\s+.*$'
+        - '^\s*PasswordAuthentication\s+.*$'
+        - '^\s*PubkeyAuthentication\s+.*$'
+        - '^\s*KbdInteractiveAuthentication\s+.*$'
+        - '^\s*ChallengeResponseAuthentication\s+.*$'
+        - '^\s*AuthenticationMethods\s+.*$'
+        - '^\s*PermitEmptyPasswords\s+.*$'
+        - '^\s*X11Forwarding\s+.*$'
+        - '^\s*MaxAuthTries\s+.*$'
+        - '^\s*ClientAliveInterval\s+.*$'
+        - '^\s*ClientAliveCountMax\s+.*$'
+        - '^\s*LoginGraceTime\s+.*$'
+        - '^\s*DebianBanner\s+.*$'
+        - '^\s*PrintMotd\s+.*$'
+        - '^\s*PrintLastLog\s+.*$'
+      notify: Restart ssh service
+
+    - name: Configure SSH authentication policy
+      ansible.builtin.blockinfile:
+        path: "{{ sshd_config_path }}"
+        marker: "# {mark} ANSIBLE MANAGED SSH AUTH POLICY"
+        backup: true
+        block: |
+          # Disable default Debian SSH banner
+          DebianBanner no
+
+          # Enable dynamic MOTD
+          PrintMotd yes
+
+          # Enable last login message
+          PrintLastLog yes
+
+          # Allow root login by password and SSH key
+          PermitRootLogin yes
+
+          # Allow password authentication for all users
+          PasswordAuthentication yes
+
+          # Enable SSH public key authentication
+          PubkeyAuthentication yes
+
+          # Disable keyboard-interactive authentication
+          KbdInteractiveAuthentication no
+
+          # Disable challenge-response authentication
+          ChallengeResponseAuthentication no
+
+          # Disallow empty passwords
+          PermitEmptyPasswords no
+
+          # Disable X11 forwarding
+          X11Forwarding no
+
+          # Limit failed authentication attempts
+          MaxAuthTries 3
+
+          # Send keepalive every 15 minutes
+          ClientAliveInterval 900
+
+          # Disconnect after 2 missed keepalives
+          ClientAliveCountMax 2
+
+          # Time allowed for login
+          LoginGraceTime 30
+      notify: Restart ssh service
+
+    - name: Validate sshd config
+      ansible.builtin.command: sshd -t
+      changed_when: false
+
+    - name: Disable default pam_motd output
+      ansible.builtin.replace:
+        path: /etc/pam.d/sshd
+        regexp: '^(session\s+optional\s+pam_motd\.so.*)$'
+        replace: '# \1'
+        backup: true
+      notify: Restart ssh service
+
+    - name: Show WOWVPN MOTD directly on SSH login
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/sshd
+        regexp: '^session\s+optional\s+pam_exec\.so\s+stdout\s+/usr/bin/run-parts\s+/etc/update-motd\.d$'
+        line: 'session    optional     pam_exec.so stdout /usr/bin/run-parts /etc/update-motd.d'
+        insertbefore: '^#?\s*session\s+optional\s+pam_motd\.so'
+        state: present
+        backup: true
+      notify: Restart ssh service
+
+    - name: Ensure root .ssh directory exists
+      ansible.builtin.file:
+        path: /root/.ssh
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Add SSH public key to root authorized_keys
+      ansible.builtin.authorized_key:
+        user: root
+        state: present
+        key: "{{ root_authorized_key }}"
+
+  handlers:
+    - name: Restart ssh service
+      ansible.builtin.service:
+        name: "{{ 'sshd' if ansible_facts.os_family in ['RedHat', 'Rocky', 'AlmaLinux', 'Suse'] else 'ssh' }}"
+        state: restarted

@@ -86,7 +86,7 @@ def get_sheets_service(credentials_path: Path):
     except ModuleNotFoundError as exc:
         raise SystemExit(
             "Google API Python packages are missing. Install them with:\n"
-            "  python3 -m pip install -r requirements-google-sheets.txt"
+            "  python3 -m pip install --user google-api-python-client google-auth"
         ) from exc
 
     credentials = service_account.Credentials.from_service_account_file(

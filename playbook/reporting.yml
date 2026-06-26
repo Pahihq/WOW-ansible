@@ -1,61 +1,4 @@
 ---
-- name: Prepare orchestration state
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: Initialize completed playbook list
-      ansible.builtin.set_fact:
-        orchestration_playbooks_done: []
-
-    - name: Use inventory hostname as default monitoring instance name
-      ansible.builtin.set_fact:
-        monitoring_instance_name: "{{ inventory_hostname }}"
-      when: monitoring_instance_name is not defined
-
-- name: Run zsh playbook
-  ansible.builtin.import_playbook: zsh.yml
-
-- name: Mark zsh playbook completed
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: Add zsh.yml to completed playbooks
-      ansible.builtin.set_fact:
-        orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['zsh.yml'] }}"
-
-- name: Run ssh playbook
-  ansible.builtin.import_playbook: ssh.yml
-
-- name: Mark ssh playbook completed
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: Add ssh.yml to completed playbooks
-      ansible.builtin.set_fact:
-        orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['ssh.yml'] }}"
-
-- name: Run RemnaNode playbook
-  ansible.builtin.import_playbook: install_remnanode.yml
-
-- name: Mark RemnaNode playbook completed
-  hosts: docker_nodes
-  gather_facts: false
-  tasks:
-    - name: Add install_remnanode.yml to completed playbooks
-      ansible.builtin.set_fact:
-        orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['install_remnanode.yml'] }}"
-
-- name: Run monitoring playbook
-  ansible.builtin.import_playbook: install_monitoring.yml
-
-- name: Mark monitoring playbook completed
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: Add install_monitoring.yml to completed playbooks
-      ansible.builtin.set_fact:
-        orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['install_monitoring.yml'] }}"
-
 - name: Collect host inventory and speedtest data
   hosts: all
   gather_facts: true
@@ -118,6 +61,7 @@
 
     - name: Build Google Sheets row payload
       ansible.builtin.set_fact:
+        orchestration_playbooks_done: "{{ orchestration_playbooks_done | default([]) }}"
         orchestration_sheet_row:
           host: "{{ inventory_hostname }}"
           public_ip: "{{ public_ip_lookup.content | default('') | trim }}"
@@ -169,10 +113,10 @@
             {% elif speedtest_text_ping_ms | default('') | length > 0 %}
             {{ speedtest_text_ping_ms | float | round(2) }}
             {% else %}{% endif %}
-          zsh_done: "{{ 'zsh.yml' in orchestration_playbooks_done }}"
-          ssh_done: "{{ 'ssh.yml' in orchestration_playbooks_done }}"
-          remnanode_done: "{{ 'install_remnanode.yml' in orchestration_playbooks_done }}"
-          monitoring_done: "{{ 'install_monitoring.yml' in orchestration_playbooks_done }}"
+          zsh_done: "{{ 'zsh' in (orchestration_playbooks_done | default([])) }}"
+          ssh_done: "{{ 'ssh' in (orchestration_playbooks_done | default([])) }}"
+          remnanode_done: "{{ 'remnanode' in (orchestration_playbooks_done | default([])) }}"
+          monitoring_done: "{{ 'monitoring' in (orchestration_playbooks_done | default([])) }}"
 
 - name: Update Google Sheet from controller
   hosts: all
@@ -183,7 +127,6 @@
     google_sheet_id: "{{ lookup('ansible.builtin.env', 'GOOGLE_SHEET_ID') | default('', true) | trim }}"
     google_sheet_tab: "{{ lookup('ansible.builtin.env', 'GOOGLE_SHEET_TAB') | default('ansible_inventory', true) }}"
     google_credentials_file: "{{ lookup('ansible.builtin.env', 'GOOGLE_CREDENTIALS_FILE') | default(playbook_dir + '/secrets/google_credentials.json', true) }}"
-    google_sheet_auto_install_python_packages: true
   tasks:
     - name: Check Google Sheet ID file
       ansible.builtin.stat:
@@ -211,7 +154,7 @@
           - google_sheet_id | length > 0
         fail_msg: >-
           GOOGLE_SHEET_ID is empty. Put spreadsheet id into {{ google_sheet_id_file }}
-          or run: GOOGLE_SHEET_ID='spreadsheet_id' ansible-playbook -i inventory.yml orchestrate.yml
+          or run: GOOGLE_SHEET_ID='spreadsheet_id' ansible-playbook -i inventory.yml reporting.yml
       delegate_to: localhost
       run_once: true
       when: google_sheet_enabled | bool
@@ -246,22 +189,17 @@
       run_once: true
       when: google_sheet_enabled | bool
 
-    - name: Install Google Sheets Python packages on controller
-      ansible.builtin.command:
-        argv:
-          - python3
-          - -m
-          - pip
-          - install
-          - --user
-          - -r
-          - "{{ playbook_dir }}/requirements-google-sheets.txt"
-      changed_when: true
+    - name: Ensure Google Sheets Python packages are installed
+      ansible.builtin.assert:
+        that:
+          - google_python_packages_check.rc == 0
+        fail_msg: >-
+          Install required Python packages on controller:
+          python3 -m pip install --user google-api-python-client google-auth
       delegate_to: localhost
       run_once: true
       when:
         - google_sheet_enabled | bool
-        - google_sheet_auto_install_python_packages | bool
         - google_python_packages_check.rc != 0
 
     - name: Update Google Sheet

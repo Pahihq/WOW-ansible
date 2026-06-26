@@ -1,0 +1,48 @@
+---
+- name: Prepare orchestration state
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Initialize completed playbook list
+      ansible.builtin.set_fact:
+        orchestration_playbooks_done: []
+
+    - name: Use inventory hostname as default monitoring instance name
+      ansible.builtin.set_fact:
+        monitoring_instance_name: "{{ monitoring_instance_name | default(inventory_hostname, true) }}"
+
+- name: Bootstrap hosts
+  ansible.builtin.import_playbook: bootstrap.yml
+
+- name: Mark bootstrap playbooks completed
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Add bootstrap playbooks to completed list
+      ansible.builtin.set_fact:
+        orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['system_update', 'zsh', 'ssh'] }}"
+
+- name: Configure RemnaNode
+  ansible.builtin.import_playbook: remnanode.yml
+
+- name: Mark RemnaNode playbooks completed
+  hosts: docker_nodes
+  gather_facts: false
+  tasks:
+    - name: Add RemnaNode playbooks to completed list
+      ansible.builtin.set_fact:
+        orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['remnanode', 'remnanode_nginx'] }}"
+
+- name: Configure monitoring stack
+  ansible.builtin.import_playbook: monitoring.yml
+
+- name: Mark monitoring playbook completed
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Add monitoring playbook to completed list
+      ansible.builtin.set_fact:
+        orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['monitoring'] }}"
+
+- name: Update reporting
+  ansible.builtin.import_playbook: reporting.yml

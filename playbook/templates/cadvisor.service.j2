@@ -1,0 +1,19 @@
+[Unit]
+Description=cAdvisor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=root
+Group=root
+Type=simple
+ExecStart={{ cadvisor_dir }}/cadvisor \
+        -listen_ip=127.0.0.1 \
+        -logtostderr \
+        -port=9101 \
+        -docker_only=true
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=VictoriaMetrics Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=root
+Group=root
+Type=simple
+ExecStart={{ vmagent_dir }}/vmagent \
+  -httpListenAddr=127.0.0.1:8429 \
+  -promscrape.config={{ vmagent_dir }}/scrape.yml \
+  -promscrape.configCheckInterval=60s \
+  -remoteWrite.url={{ vmagent_remote_write_url }} \
+  -remoteWrite.basicAuth.username={{ vmagent_remote_write_username }} \
+  -remoteWrite.basicAuth.password={{ vmagent_remote_write_password }}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
