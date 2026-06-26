@@ -4,8 +4,6 @@
   become: true
 
   vars:
-    monitoring_instance_name: Netherlands2_node
-
     vmagent_secrets_file: "{{ playbook_dir }}/secrets/vmagent.yml"
 
     cadvisor_version: "0.57.0"
@@ -25,6 +23,10 @@
     vmagent_url: "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v{{ vmagent_version }}/vmutils-linux-amd64-v{{ vmagent_version }}.tar.gz"
 
   pre_tasks:
+    - name: Use inventory hostname as default monitoring instance name
+      ansible.builtin.set_fact:
+        monitoring_instance_name: "{{ monitoring_instance_name | default(inventory_hostname, true) }}"
+
     - name: Check vmagent secrets file on controller
       ansible.builtin.stat:
         path: "{{ vmagent_secrets_file }}"
