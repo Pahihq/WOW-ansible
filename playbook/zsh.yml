@@ -1,0 +1,293 @@
+---
+- name: Install and configure zsh with oh-my-zsh and powerlevel10k
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    # Можно переопределить при запуске:
+    # ansible-playbook zsh.yml -e zsh_user=root
+    zsh_target_user: "{{ zsh_user | default(ansible_user) }}"
+
+    zshrc_source_file: "files/.zshrc"
+    p10k_source_file: "files/.p10k.zsh"
+
+    zsh_packages:
+      - zsh
+      - git
+      - curl
+
+    zsh_plugins:
+      - git
+      - zsh-autosuggestions
+      - zsh-syntax-highlighting
+
+    p10k_themes:
+      - name: Arctic Blue
+        ok_background: 33
+        error_background: 160
+      - name: Emerald Night
+        ok_background: 29
+        error_background: 160
+      - name: Purple Void
+        ok_background: 99
+        error_background: 161
+      - name: Rose Neon
+        ok_background: 168
+        error_background: 197
+      - name: Sunset Orange
+        ok_background: 208
+        error_background: 196
+      - name: Crimson Steel
+        ok_background: 124
+        error_background: 196
+      - name: Graphite Cyan
+        ok_background: 24
+        error_background: 160
+      - name: Nord Frost
+        ok_background: 67
+        error_background: 203
+      - name: Tokyo Storm
+        ok_background: 111
+        error_background: 204
+      - name: Deep Ocean
+        ok_background: 31
+        error_background: 160
+      - name: Forest Moss
+        ok_background: 64
+        error_background: 167
+      - name: Golden Hour
+        ok_background: 178
+        error_background: 160
+      - name: Lavender Mist
+        ok_background: 140
+        error_background: 197
+      - name: Cyber Lime
+        ok_background: 76
+        error_background: 196
+      - name: Ruby Wine
+        ok_background: 89
+        error_background: 196
+
+  pre_tasks:
+    - name: Read target user account data
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ zsh_target_user }}"
+
+    - name: Save target user paths
+      ansible.builtin.set_fact:
+        zsh_target_gid: "{{ getent_passwd[zsh_target_user][2] }}"
+        zsh_target_home: "{{ getent_passwd[zsh_target_user][4] }}"
+
+    - name: Select stable p10k theme by hostname
+      ansible.builtin.set_fact:
+        p10k_theme: "{{ p10k_themes[(inventory_hostname | hash('md5') | int(base=16)) % (p10k_themes | length)] }}"
+
+  tasks:
+    - name: Install required packages
+      ansible.builtin.package:
+        name: "{{ zsh_packages }}"
+        state: present
+
+    - name: Find zsh binary
+      ansible.builtin.shell: command -v zsh
+      register: zsh_binary
+      changed_when: false
+
+    - name: Add zsh to /etc/shells
+      ansible.builtin.lineinfile:
+        path: /etc/shells
+        line: "{{ zsh_binary.stdout }}"
+        state: present
+        create: true
+        mode: "0644"
+
+    - name: Check existing oh-my-zsh directory
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.oh-my-zsh"
+      register: ohmyzsh_dir
+
+    - name: Check existing oh-my-zsh git repository
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.oh-my-zsh/.git"
+      register: ohmyzsh_git
+
+    - name: Install oh-my-zsh if missing
+      ansible.builtin.git:
+        repo: https://github.com/ohmyzsh/ohmyzsh.git
+        dest: "{{ zsh_target_home }}/.oh-my-zsh"
+        version: master
+        depth: 1
+        update: false
+        force: false
+      when: not ohmyzsh_dir.stat.exists
+
+    - name: Skip existing non-git oh-my-zsh directory
+      ansible.builtin.debug:
+        msg: "oh-my-zsh already exists and is not a git repo, not overwriting: {{ zsh_target_home }}/.oh-my-zsh"
+      when:
+        - ohmyzsh_dir.stat.exists
+        - not ohmyzsh_git.stat.exists
+
+    - name: Ensure oh-my-zsh custom directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0755"
+      loop:
+        - "{{ zsh_target_home }}/.oh-my-zsh/custom/themes"
+        - "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins"
+
+    - name: Check existing powerlevel10k theme
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.oh-my-zsh/custom/themes/powerlevel10k"
+      register: p10k_dir
+
+    - name: Install powerlevel10k theme if missing
+      ansible.builtin.git:
+        repo: https://github.com/romkatv/powerlevel10k.git
+        dest: "{{ zsh_target_home }}/.oh-my-zsh/custom/themes/powerlevel10k"
+        version: master
+        depth: 1
+        update: false
+        force: false
+      when: not p10k_dir.stat.exists
+
+    - name: Check existing zsh-syntax-highlighting plugin
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting"
+      register: zsh_syntax_highlighting_dir
+
+    - name: Install zsh-syntax-highlighting plugin if missing
+      ansible.builtin.git:
+        repo: https://github.com/zsh-users/zsh-syntax-highlighting.git
+        dest: "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting"
+        version: master
+        depth: 1
+        update: false
+        force: false
+      when: not zsh_syntax_highlighting_dir.stat.exists
+
+    - name: Check existing zsh-autosuggestions plugin
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
+      register: zsh_autosuggestions_dir
+
+    - name: Install zsh-autosuggestions plugin if missing
+      ansible.builtin.git:
+        repo: https://github.com/zsh-users/zsh-autosuggestions.git
+        dest: "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
+        version: master
+        depth: 1
+        update: false
+        force: false
+      when: not zsh_autosuggestions_dir.stat.exists
+
+    - name: Check existing .zshrc
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.zshrc"
+      register: zshrc_file
+
+    - name: Copy .zshrc if missing
+      ansible.builtin.copy:
+        src: "{{ zshrc_source_file }}"
+        dest: "{{ zsh_target_home }}/.zshrc"
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+      when: not zshrc_file.stat.exists
+
+    - name: Set powerlevel10k theme in .zshrc
+      ansible.builtin.lineinfile:
+        path: "{{ zsh_target_home }}/.zshrc"
+        regexp: '^ZSH_THEME='
+        line: 'ZSH_THEME="powerlevel10k/powerlevel10k"'
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+
+    - name: Check existing .p10k.zsh
+      ansible.builtin.stat:
+        path: "{{ zsh_target_home }}/.p10k.zsh"
+      register: p10k_file
+
+    - name: Copy .p10k.zsh if missing
+      ansible.builtin.copy:
+        src: "{{ p10k_source_file }}"
+        dest: "{{ zsh_target_home }}/.p10k.zsh"
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+      when: not p10k_file.stat.exists
+
+    - name: Apply selected p10k host theme colors
+      ansible.builtin.blockinfile:
+        path: "{{ zsh_target_home }}/.p10k.zsh"
+        marker: "# {mark} ANSIBLE MANAGED P10K HOST THEME"
+        insertafter: EOF
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+        block: |
+          # Theme: {{ p10k_theme.name }}
+          # Host: {{ inventory_hostname }}
+
+          typeset -g POWERLEVEL9K_OS_ICON_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_DIR_BACKGROUND={{ p10k_theme.ok_background }}
+
+          typeset -g POWERLEVEL9K_VCS_CLEAN_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_VCS_MODIFIED_BACKGROUND={{ p10k_theme.error_background }}
+          typeset -g POWERLEVEL9K_VCS_UNTRACKED_BACKGROUND={{ p10k_theme.error_background }}
+
+          typeset -g POWERLEVEL9K_STATUS_OK_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_STATUS_ERROR_BACKGROUND={{ p10k_theme.error_background }}
+
+          typeset -g POWERLEVEL9K_COMMAND_EXECUTION_TIME_BACKGROUND={{ p10k_theme.ok_background }}
+
+          typeset -g POWERLEVEL9K_CONTEXT_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_CONTEXT_ROOT_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_CONTEXT_ROOT_FOREGROUND=15
+
+          typeset -g POWERLEVEL9K_PROMPT_CHAR_OK_VIINS_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_PROMPT_CHAR_OK_VICMD_BACKGROUND={{ p10k_theme.ok_background }}
+          typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VIINS_BACKGROUND={{ p10k_theme.error_background }}
+          typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VICMD_BACKGROUND={{ p10k_theme.error_background }}
+
+    - name: Source .p10k.zsh from .zshrc
+      ansible.builtin.lineinfile:
+        path: "{{ zsh_target_home }}/.zshrc"
+        line: '[[ ! -f "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"'
+        state: present
+        insertafter: EOF
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+
+    - name: Set zsh as default shell
+      ansible.builtin.user:
+        name: "{{ zsh_target_user }}"
+        shell: "{{ zsh_binary.stdout }}"
+
+    - name: Fix oh-my-zsh ownership
+      ansible.builtin.file:
+        path: "{{ zsh_target_home }}/.oh-my-zsh"
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        recurse: true
+
+    - name: Fix config files ownership
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: "{{ zsh_target_user }}"
+        group: "{{ zsh_target_gid }}"
+        mode: "0644"
+      loop:
+        - "{{ zsh_target_home }}/.zshrc"
+        - "{{ zsh_target_home }}/.p10k.zsh"
+
+    - name: Show selected theme
+      ansible.builtin.debug:
+        msg: "Selected p10k theme for {{ inventory_hostname }}: {{ p10k_theme.name }}"

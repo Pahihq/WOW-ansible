@@ -1,0 +1,42 @@
+# Local inventory and overrides
+inventory.yml
+inventory.yaml
+*.local.yml
+*.local.yaml
+!*.example
+
+# Secrets
+playbook/secrets/
+*.vault
+*.vault.yml
+*.vault.yaml
+
+# Ansible runtime artifacts
+*.retry
+.ansible/
+ansible_facts_cache/
+fact_cache/
+
+# Logs
+logs/
+*.log
+
+# Generated reports and temporary files
+playbook/reports/
+tmp/
+temp/
+*.tmp
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

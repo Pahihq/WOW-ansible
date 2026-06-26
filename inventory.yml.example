@@ -1,0 +1,25 @@
+---
+all:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  children:
+    docker_panel:
+      hosts:
+        panel_01:
+          ansible_host: 203.0.113.10
+          ansible_user: root
+          monitoring_instance_name: panel_01
+
+        site_01:
+          ansible_host: 203.0.113.11
+          ansible_user: root
+          monitoring_instance_name: site_01
+
+    docker_nodes:
+      hosts:
+        node_01:
+          ansible_host: 203.0.113.20
+          ansible_user: root
+          monitoring_instance_name: node_01
+          domain: node-01.example.com

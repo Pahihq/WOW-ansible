@@ -1,0 +1,66 @@
+---
+- name: Update Linux hosts without reboot
+  hosts: docker_nodes
+  become: true
+  gather_facts: true
+  serial: "20%"
+
+  vars:
+    apt_upgrade_mode: safe
+
+  pre_tasks:
+    - name: Refuse unsupported OS family
+      ansible.builtin.fail:
+        msg: "Unsupported OS family: {{ ansible_facts.os_family }}"
+      when: ansible_facts.os_family not in ["Debian", "RedHat"]
+
+  tasks:
+    - name: Debian/Ubuntu | Update apt cache and upgrade packages without reboot
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        upgrade: "{{ apt_upgrade_mode }}"
+        dpkg_options: "force-confdef,force-confold"
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_SUSPEND: "1"
+      when: ansible_facts.os_family == "Debian"
+
+    - name: RHEL/Rocky/Alma/Fedora | Upgrade installed packages without reboot
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_cache: true
+        update_only: true
+      when: ansible_facts.os_family == "RedHat"
+
+    - name: Debian/Ubuntu | Check whether reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: debian_reboot_required
+      changed_when: false
+      when: ansible_facts.os_family == "Debian"
+
+    - name: RHEL-like | Check whether reboot is required if needs-restarting exists
+      ansible.builtin.command: needs-restarting -r
+      register: rhel_reboot_required
+      changed_when: false
+      failed_when: false
+      when: ansible_facts.os_family == "RedHat"
+
+    - name: Report reboot requirement, but do not reboot
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} updated.
+          Reboot required:
+          {{
+            (
+              ansible_facts.os_family == "Debian"
+              and debian_reboot_required.stat.exists | default(false)
+            )
+            or
+            (
+              ansible_facts.os_family == "RedHat"
+              and rhel_reboot_required.rc | default(0) == 1
+            )
+          }}

@@ -1,0 +1,493 @@
+---
+- name: Configure Remnawave Node behind nginx with Trojan gRPC TLS
+  hosts: docker_nodes
+  become: true
+  gather_facts: true
+
+  vars:
+    remnanode_domain: "{{ domain | default(node_domain | default(inventory_hostname)) }}"
+    remnanode_email: admin@wowsecure.ru
+    remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
+
+    remnanode_dir: /opt/remnanode
+    certbot_dir: /opt/certbot
+    web_root: /var/www/html
+    site_host_dir: "{{ remnanode_dir }}/site"
+    site_archive_local: "{{ playbook_dir }}/files/site.zip"
+    site_archive_remote: "{{ remnanode_dir }}/site.zip"
+
+    grpc_service_name: trgrpc
+    xray_grpc_listen: 127.0.0.1
+    xray_grpc_port: 8443
+    remnanode_api_port: 21412
+
+  pre_tasks:
+    - name: Check required inventory variables
+      ansible.builtin.assert:
+        that:
+          - remnanode_domain is defined
+          - remnanode_domain | length > 3
+          - remnanode_email is defined
+          - remnanode_email | length > 3
+        fail_msg: "Set domain in inventory for this host."
+
+    - name: Check local Remnawave secret key file
+      ansible.builtin.stat:
+        path: "{{ remnanode_secret_key_file }}"
+      delegate_to: localhost
+      become: false
+      register: remnanode_secret_key_file_stat
+
+    - name: Fail if local secret key file is missing
+      ansible.builtin.assert:
+        that:
+          - remnanode_secret_key_file_stat.stat.exists
+        fail_msg: "Secret key file is missing: {{ remnanode_secret_key_file }}"
+
+    - name: Check local site archive
+      ansible.builtin.stat:
+        path: "{{ site_archive_local }}"
+      delegate_to: localhost
+      become: false
+      register: site_archive_local_stat
+
+    - name: Fail if local site archive is missing
+      ansible.builtin.assert:
+        that:
+          - site_archive_local_stat.stat.exists
+        fail_msg: "Site archive is missing: {{ site_archive_local }}"
+
+    - name: Read local Remnawave secret key
+      ansible.builtin.set_fact:
+        remnanode_secret_key: "{{ lookup('ansible.builtin.file', remnanode_secret_key_file) | trim }}"
+      no_log: true
+
+    - name: Check Docker CLI
+      ansible.builtin.command: docker --version
+      register: docker_cli_check
+      changed_when: false
+
+    - name: Check Docker Compose plugin
+      ansible.builtin.command: docker compose version
+      register: docker_compose_check
+      changed_when: false
+
+  tasks:
+    - name: Create required directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ remnanode_dir }}"
+        - "{{ site_host_dir }}"
+        - /var/www
+        - "{{ certbot_dir }}"
+        - "{{ certbot_dir }}/certs"
+        - "{{ certbot_dir }}/var-lib-letsencrypt"
+
+    - name: Link nginx web root to site next to Remnawave compose file
+      ansible.builtin.file:
+        src: "{{ site_host_dir }}"
+        dest: "{{ web_root }}"
+        state: link
+        force: true
+        owner: root
+        group: root
+
+    - name: Create fallback web page
+      ansible.builtin.copy:
+        dest: "{{ site_host_dir }}/index.html"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>{{ remnanode_domain }}</title>
+            <style>
+              body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #0b0d10; color: #f2f4f8; }
+              main { text-align: center; }
+              h1 { font-size: 28px; margin: 0 0 8px; }
+              p { margin: 0; color: #9ba3af; }
+            </style>
+          </head>
+          <body>
+            <main>
+              <h1>{{ remnanode_domain }}</h1>
+              <p>ok</p>
+            </main>
+          </body>
+          </html>
+
+    - name: Copy site archive next to Remnawave compose file
+      ansible.builtin.copy:
+        src: "{{ site_archive_local }}"
+        dest: "{{ site_archive_remote }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: site_archive_copy
+
+    - name: Check site archive extractor
+      ansible.builtin.shell: command -v unzip || command -v 7z || command -v 7zz || command -v bsdtar
+      args:
+        executable: /bin/bash
+      register: site_archive_extractor_check
+      changed_when: false
+      failed_when: false
+
+    - name: Try to install site archive extractor
+      ansible.builtin.package:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - unzip
+        - p7zip-full
+        - p7zip
+      register: site_archive_extractor_install
+      failed_when: false
+      when: site_archive_extractor_check.rc != 0
+
+    - name: Check site archive extractor after install
+      ansible.builtin.shell: command -v unzip || command -v 7z || command -v 7zz || command -v bsdtar
+      args:
+        executable: /bin/bash
+      register: site_archive_extractor_after_install
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if site archive extractor is unavailable
+      ansible.builtin.assert:
+        that:
+          - site_archive_extractor_after_install.rc == 0
+        fail_msg: "Install unzip, 7z/7zz or bsdtar on the target host to unpack {{ site_archive_remote }}."
+
+    - name: Unpack site archive next to Remnawave compose file
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        rm -rf {{ site_host_dir | quote }}/*
+
+        if command -v unzip >/dev/null 2>&1; then
+          unzip -oq {{ site_archive_remote | quote }} -d {{ site_host_dir | quote }}
+        elif command -v 7z >/dev/null 2>&1; then
+          7z x -y {{ site_archive_remote | quote }} -o{{ site_host_dir | quote }}
+        elif command -v 7zz >/dev/null 2>&1; then
+          7zz x -y {{ site_archive_remote | quote }} -o{{ site_host_dir | quote }}
+        else
+          bsdtar -xf {{ site_archive_remote | quote }} -C {{ site_host_dir | quote }}
+        fi
+
+        if [ ! -f {{ site_host_dir | quote }}/index.html ] && [ -f {{ site_host_dir | quote }}/site/index.html ]; then
+          tmp_dir="$(mktemp -d)"
+          cp -a {{ site_host_dir | quote }}/site/. "$tmp_dir"/
+          rm -rf {{ site_host_dir | quote }}/*
+          cp -a "$tmp_dir"/. {{ site_host_dir | quote }}/
+          rm -rf "$tmp_dir"
+        fi
+
+        chown -R root:root {{ site_host_dir | quote }}
+        find {{ site_host_dir | quote }} -type d -exec chmod 0755 {} \;
+        find {{ site_host_dir | quote }} -type f -exec chmod 0644 {} \;
+      args:
+        executable: /bin/bash
+
+    - name: Write certbot compose file
+      ansible.builtin.copy:
+        dest: "{{ certbot_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          services:
+            certbot:
+              container_name: certbot
+              image: certbot/certbot
+              network_mode: host
+              volumes:
+                - ./certs:/etc/letsencrypt
+                - ./var-lib-letsencrypt:/var/lib/letsencrypt
+
+    - name: Check existing Let's Encrypt certificate
+      ansible.builtin.stat:
+        path: "{{ certbot_dir }}/certs/live/{{ remnanode_domain }}/fullchain.pem"
+      register: letsencrypt_fullchain
+
+    - name: Issue Let's Encrypt certificate
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - -v
+          - "{{ certbot_dir }}/certs:/etc/letsencrypt"
+          - -v
+          - "{{ certbot_dir }}/var-lib-letsencrypt:/var/lib/letsencrypt"
+          - --network
+          - host
+          - certbot/certbot
+          - certonly
+          - --standalone
+          - --non-interactive
+          - --agree-tos
+          - --email
+          - "{{ remnanode_email }}"
+          - -d
+          - "{{ remnanode_domain }}"
+      when: not letsencrypt_fullchain.stat.exists
+      notify: Start Remnawave stack
+
+    - name: Write nginx configuration
+      ansible.builtin.copy:
+        dest: "{{ remnanode_dir }}/nginx.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          worker_processes auto;
+          worker_rlimit_nofile 65535;
+
+          error_log /var/log/nginx/error.log warn;
+          pid /var/run/nginx.pid;
+
+          events {
+              worker_connections 8192;
+              multi_accept on;
+              use epoll;
+          }
+
+          http {
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+
+              server_tokens off;
+              charset utf-8;
+
+              access_log /var/log/nginx/access.log;
+              error_log /var/log/nginx/error.log warn;
+
+              sendfile on;
+              tcp_nopush on;
+              tcp_nodelay on;
+
+              keepalive_timeout 75s;
+              keepalive_requests 1000;
+
+              client_max_body_size 50m;
+              client_body_buffer_size 2m;
+
+              client_header_buffer_size 16k;
+              large_client_header_buffers 8 64k;
+
+              reset_timedout_connection on;
+
+              gzip on;
+              gzip_vary on;
+              gzip_comp_level 5;
+              gzip_min_length 1024;
+              gzip_types
+                  text/plain
+                  text/css
+                  application/json
+                  application/javascript
+                  text/xml
+                  application/xml
+                  application/xml+rss
+                  image/svg+xml
+                  text/javascript;
+
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+              ssl_prefer_server_ciphers off;
+              ssl_session_cache shared:SSL:50m;
+              ssl_session_timeout 1d;
+              ssl_session_tickets off;
+
+              upstream xray_trojan_grpc {
+                  server {{ xray_grpc_listen }}:{{ xray_grpc_port }};
+                  keepalive 64;
+              }
+
+              server {
+                  listen 80;
+                  listen [::]:80;
+
+                  server_name {{ remnanode_domain }};
+
+                  location /.well-known/acme-challenge/ {
+                      root {{ web_root }};
+                  }
+
+                  location / {
+                      return 301 https://$host$request_uri;
+                  }
+              }
+
+              server {
+                  listen 443 ssl;
+                  listen [::]:443 ssl;
+
+                  http2 on;
+
+                  server_name {{ remnanode_domain }};
+
+                  ssl_certificate /etc/nginx/ssl/{{ remnanode_domain }}/fullchain.pem;
+                  ssl_certificate_key /etc/nginx/ssl/{{ remnanode_domain }}/privkey.pem;
+
+                  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+                  add_header X-Content-Type-Options "nosniff" always;
+
+                  root {{ web_root }};
+                  index index.html index.htm;
+
+                  location ^~ /{{ grpc_service_name }} {
+                      grpc_pass grpc://xray_trojan_grpc;
+
+                      grpc_set_header Host $host;
+                      grpc_set_header X-Real-IP $remote_addr;
+                      grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                      grpc_set_header X-Forwarded-Proto $scheme;
+                      grpc_set_header X-Forwarded-Host $host;
+
+                      grpc_read_timeout 1h;
+                      grpc_send_timeout 1h;
+
+                      client_body_timeout 60s;
+
+                      access_log off;
+
+                      error_page 502 = @grpc_error;
+                  }
+
+                  location @grpc_error {
+                      return 404;
+                  }
+
+                  location = /healthz {
+                      access_log off;
+                      default_type text/plain;
+                      return 200 "ok\n";
+                  }
+
+                  location ~* \.(css|js|svg|woff2?|ico|png|jpg|jpeg|webp|gif)$ {
+                      expires 30d;
+                      add_header Cache-Control "public, immutable";
+                      access_log off;
+                      try_files $uri =404;
+                  }
+
+                  location = /favicon.ico {
+                      access_log off;
+                      return 204;
+                  }
+
+                  location = /robots.txt {
+                      access_log off;
+                      log_not_found off;
+                      try_files $uri =404;
+                  }
+
+                  location / {
+                      try_files $uri $uri/ /index.html;
+                  }
+              }
+          }
+      notify:
+        - Start Remnawave stack
+        - Test nginx configuration
+        - Reload nginx
+
+    - name: Write Remnawave Node compose file
+      ansible.builtin.copy:
+        dest: "{{ remnanode_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          x-common: &common
+            ulimits:
+              nofile:
+                soft: 1048576
+                hard: 1048576
+            restart: always
+
+          x-logging: &logging
+            logging:
+              driver: json-file
+              options:
+                max-size: 100m
+                max-file: 5
+
+          services:
+            remnawave-nginx:
+              image: nginx:1.28
+              container_name: remnawave-nginx
+              hostname: remnawave-nginx
+              <<: [*common, *logging]
+              network_mode: host
+              volumes:
+                - ./nginx.conf:/etc/nginx/nginx.conf:ro
+                - {{ certbot_dir }}/certs/live/{{ remnanode_domain }}/fullchain.pem:/etc/nginx/ssl/{{ remnanode_domain }}/fullchain.pem:ro
+                - {{ certbot_dir }}/certs/live/{{ remnanode_domain }}/privkey.pem:/etc/nginx/ssl/{{ remnanode_domain }}/privkey.pem:ro
+                - /dev/shm:/dev/shm:rw
+                - {{ web_root }}:{{ web_root }}:ro
+              command: sh -c 'exec nginx -g "daemon off;"'
+
+            remnanode:
+              image: remnawave/node:latest
+              container_name: remnanode
+              hostname: remnanode
+              <<: [*common, *logging]
+              network_mode: host
+              cap_add:
+                - NET_ADMIN
+              environment:
+                - NODE_PORT={{ remnanode_api_port }}
+                - SECRET_KEY={{ remnanode_secret_key }}
+              volumes:
+                - /dev/shm:/dev/shm:rw
+      no_log: true
+      notify:
+        - Start Remnawave stack
+        - Test nginx configuration
+        - Reload nginx
+
+    - name: Check HTTPS health endpoint
+      ansible.builtin.command:
+        argv:
+          - curl
+          - -fsS
+          - --max-time
+          - "10"
+          - "https://{{ remnanode_domain }}/healthz"
+      register: healthz_check
+      changed_when: false
+
+    - name: Show connection settings
+      ansible.builtin.debug:
+        msg:
+          - "Address/SNI/Host: {{ remnanode_domain }}"
+          - "Port: 443"
+          - "Protocol: Trojan"
+          - "Network: gRPC"
+          - "Security: TLS"
+          - "gRPC serviceName: {{ grpc_service_name }}"
+          - "Internal Xray gRPC: {{ xray_grpc_listen }}:{{ xray_grpc_port }}"
+
+  handlers:
+    - name: Start Remnawave stack
+      ansible.builtin.command: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ remnanode_dir }}"
+
+    - name: Test nginx configuration
+      ansible.builtin.command: docker exec remnawave-nginx nginx -t
+
+    - name: Reload nginx
+      ansible.builtin.shell: docker exec remnawave-nginx nginx -s reload || docker restart remnawave-nginx

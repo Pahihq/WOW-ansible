@@ -1,0 +1,414 @@
+---
+- name: Install monitoring stack | cAdvisor, node_exporter, vmagent
+  hosts: all
+  become: true
+
+  vars:
+    monitoring_instance_name: Netherlands2_node
+
+    vmagent_secrets_file: "{{ playbook_dir }}/secrets/vmagent.yml"
+
+    cadvisor_version: "0.57.0"
+    node_exporter_version: "1.9.1"
+    vmagent_version: "1.123.0"
+
+    base_dir: /opt/monitoring
+    cadvisor_dir: /opt/monitoring/cadvisor
+    nodeexporter_dir: /opt/monitoring/nodeexporter
+    vmagent_dir: /opt/monitoring/vmagent
+    vmagent_conf_dir: /opt/monitoring/vmagent/conf.d
+    node_exporter_textfile_dir: /var/lib/node_exporter/textfile_collector
+    speedtest_metrics_script: /usr/local/bin/speedtest_metrics.sh
+
+    cadvisor_url: "https://github.com/google/cadvisor/releases/download/v{{ cadvisor_version }}/cadvisor-v{{ cadvisor_version }}-linux-amd64"
+    node_exporter_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    vmagent_url: "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v{{ vmagent_version }}/vmutils-linux-amd64-v{{ vmagent_version }}.tar.gz"
+
+  pre_tasks:
+    - name: Check vmagent secrets file on controller
+      ansible.builtin.stat:
+        path: "{{ vmagent_secrets_file }}"
+      delegate_to: localhost
+      become: false
+      register: vmagent_secrets_file_stat
+
+    - name: Read vmagent secrets from controller file
+      ansible.builtin.include_vars:
+        file: "{{ vmagent_secrets_file }}"
+      when: vmagent_secrets_file_stat.stat.exists
+      no_log: true
+
+    - name: Validate vmagent secrets
+      ansible.builtin.assert:
+        that:
+          - vmagent_secrets_file_stat.stat.exists
+          - vmagent_remote_write_url is defined
+          - vmagent_remote_write_url | length > 0
+          - vmagent_remote_write_username is defined
+          - vmagent_remote_write_username | length > 0
+          - vmagent_remote_write_password is defined
+          - vmagent_remote_write_password | length > 0
+        fail_msg: "Put vmagent remote write URL, username, and password into {{ vmagent_secrets_file }}"
+
+  tasks:
+    - name: Show instance name
+      debug:
+        msg: "{{ monitoring_instance_name }}"
+
+    - name: Set hostname from monitoring instance name
+      ansible.builtin.hostname:
+        name: "{{ monitoring_instance_name | lower | regex_replace('_', '-') }}"
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - tar
+          - ncdu
+          - duf
+          - btop
+          - iotop
+          - jq
+        state: present
+        update_cache: true
+
+    - name: Create monitoring directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ base_dir }}"
+        - "{{ cadvisor_dir }}"
+        - "{{ nodeexporter_dir }}"
+        - "{{ vmagent_dir }}"
+        - "{{ vmagent_conf_dir }}"
+        - "{{ node_exporter_textfile_dir }}"
+
+    # =========================
+    # speedtest metrics
+    # =========================
+
+    - name: Install speedtest metrics script
+      ansible.builtin.copy:
+        src: files/speedtest_metrics.sh
+        dest: "{{ speedtest_metrics_script }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create speedtest metrics systemd service
+      ansible.builtin.copy:
+        src: files/speedtest-metrics.service
+        dest: /etc/systemd/system/speedtest-metrics.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+
+    - name: Create speedtest metrics systemd timer
+      ansible.builtin.copy:
+        src: files/speedtest-metrics.timer
+        dest: /etc/systemd/system/speedtest-metrics.timer
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+
+    # =========================
+    # cAdvisor
+    # =========================
+
+    - name: Download cAdvisor binary
+      ansible.builtin.get_url:
+        url: "{{ cadvisor_url }}"
+        dest: "{{ cadvisor_dir }}/cadvisor"
+        owner: root
+        group: root
+        mode: "0755"
+        force: true
+      notify:
+        - Restart cadvisor
+
+    # =========================
+    # node_exporter
+    # =========================
+
+    - name: Create temporary node_exporter install directory
+      ansible.builtin.file:
+        path: /tmp/node_exporter_install
+        state: absent
+
+    - name: Recreate temporary node_exporter install directory
+      ansible.builtin.file:
+        path: /tmp/node_exporter_install
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download and unpack node_exporter
+      ansible.builtin.unarchive:
+        src: "{{ node_exporter_url }}"
+        dest: /tmp/node_exporter_install
+        remote_src: true
+
+    - name: Install node_exporter binary
+      ansible.builtin.copy:
+        src: "/tmp/node_exporter_install/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: "{{ nodeexporter_dir }}/node_exporter"
+        owner: root
+        group: root
+        mode: "0755"
+        remote_src: true
+      notify:
+        - Restart nodeexporter
+
+    - name: Remove temporary node_exporter files
+      ansible.builtin.file:
+        path: /tmp/node_exporter_install
+        state: absent
+
+    # =========================
+    # vmagent
+    # =========================
+
+    - name: Remove temporary vmagent install directory
+      ansible.builtin.file:
+        path: /tmp/vmagent_install
+        state: absent
+
+    - name: Create temporary vmagent install directory
+      ansible.builtin.file:
+        path: /tmp/vmagent_install
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download and unpack vmutils
+      ansible.builtin.unarchive:
+        src: "{{ vmagent_url }}"
+        dest: /tmp/vmagent_install
+        remote_src: true
+
+    - name: Install vmagent binary
+      ansible.builtin.copy:
+        src: /tmp/vmagent_install/vmagent-prod
+        dest: "{{ vmagent_dir }}/vmagent"
+        owner: root
+        group: root
+        mode: "0755"
+        remote_src: true
+      notify:
+        - Restart vmagent
+
+    - name: Remove temporary vmagent files
+      ansible.builtin.file:
+        path: /tmp/vmagent_install
+        state: absent
+
+    # =========================
+    # vmagent configs
+    # =========================
+
+    - name: Create vmagent main scrape config
+      ansible.builtin.copy:
+        dest: "{{ vmagent_dir }}/scrape.yml"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          scrape_config_files:
+            - "{{ vmagent_conf_dir }}/*.yml"
+
+          global:
+            scrape_interval: 15s
+      notify:
+        - Restart vmagent
+
+    - name: Create cAdvisor scrape config
+      ansible.builtin.copy:
+        dest: "{{ vmagent_conf_dir }}/cadvisor.yml"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          - job_name: integrations/cAdvisor
+            scrape_interval: 15s
+            static_configs:
+              - targets: ['localhost:9101']
+                labels:
+                  instance: "{{ monitoring_instance_name }}"
+      notify:
+        - Restart vmagent
+
+    - name: Create node_exporter scrape config
+      ansible.builtin.copy:
+        dest: "{{ vmagent_conf_dir }}/nodeexporter.yml"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          - job_name: integrations/node_exporter
+            scrape_interval: 15s
+            static_configs:
+              - targets: ['localhost:9100']
+                labels:
+                  instance: "{{ monitoring_instance_name }}"
+      notify:
+        - Restart vmagent
+
+    # =========================
+    # systemd units
+    # =========================
+
+    - name: Create cAdvisor systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/cadvisor.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=cAdvisor
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=root
+          Group=root
+          Type=simple
+          ExecStart={{ cadvisor_dir }}/cadvisor \
+                  -listen_ip=127.0.0.1 \
+                  -logtostderr \
+                  -port=9101 \
+                  -docker_only=true
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+        - Restart cadvisor
+
+    - name: Create node_exporter systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nodeexporter.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Node Exporter
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=root
+          Group=root
+          Type=simple
+          ExecStart=/opt/monitoring/nodeexporter/node_exporter --web.listen-address=127.0.0.1:9100 --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+        - Restart nodeexporter
+
+    - name: Create vmagent systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/vmagent.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=VictoriaMetrics Agent
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=root
+          Group=root
+          Type=simple
+          ExecStart=/opt/monitoring/vmagent/vmagent \
+            -httpListenAddr=127.0.0.1:8429 \
+            -promscrape.config=/opt/monitoring/vmagent/scrape.yml \
+            -promscrape.configCheckInterval=60s \
+            -remoteWrite.url={{ vmagent_remote_write_url }} \
+            -remoteWrite.basicAuth.username={{ vmagent_remote_write_username }} \
+            -remoteWrite.basicAuth.password={{ vmagent_remote_write_password }}
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+      no_log: true
+      notify:
+        - Reload systemd
+        - Restart vmagent
+
+    - name: Force systemd reload before enabling services
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start monitoring services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - cadvisor
+        - nodeexporter
+        - vmagent
+        - speedtest-metrics.timer
+
+    - name: Check monitoring services status
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      loop:
+        - cadvisor
+        - nodeexporter
+        - vmagent
+        - speedtest-metrics.timer
+      register: monitoring_status
+      changed_when: false
+      failed_when: false
+
+    - name: Show monitoring services status
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout }}"
+      loop: "{{ monitoring_status.results }}"
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart cadvisor
+      ansible.builtin.systemd:
+        name: cadvisor
+        state: restarted
+        enabled: true
+        daemon_reload: true
+
+    - name: Restart nodeexporter
+      ansible.builtin.systemd:
+        name: nodeexporter
+        state: restarted
+        enabled: true
+        daemon_reload: true
+
+    - name: Restart vmagent
+      ansible.builtin.systemd:
+        name: vmagent
+        state: restarted
+        enabled: true
+        daemon_reload: true

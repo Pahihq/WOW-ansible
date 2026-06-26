@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Ookla speedtest metrics daily at night
+
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 00/3:00:00
+RandomizedDelaySec=2h59min
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
