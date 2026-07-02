@@ -1,0 +1,94 @@
+---
+- name: Rolling update remnanode docker compose
+  hosts: docker_nodes
+  become: true
+  gather_facts: false
+  serial: "{{ batch_size | default(3) }}"
+
+  vars:
+    remnanode_dir: /opt/remnanode
+    compose_pull: true
+    compose_remove_orphans: true
+    wait_after_update_seconds: 15
+
+  pre_tasks:
+    - name: Check remnanode directory exists
+      ansible.builtin.stat:
+        path: "{{ remnanode_dir }}"
+      register: remnanode_path
+
+    - name: Stop if remnanode directory is missing
+      ansible.builtin.fail:
+        msg: "{{ remnanode_dir }} does not exist on {{ inventory_hostname }}"
+      when: not remnanode_path.stat.isdir | default(false)
+
+    - name: Check docker is available
+      ansible.builtin.command: docker --version
+      changed_when: false
+
+    - name: Check docker compose v2 is available
+      ansible.builtin.command: docker compose version
+      changed_when: false
+      register: docker_compose_v2
+      failed_when: false
+
+    - name: Check docker-compose v1 is available
+      ansible.builtin.command: docker-compose --version
+      changed_when: false
+      register: docker_compose_v1
+      failed_when: false
+      when: docker_compose_v2.rc != 0
+
+    - name: Select compose command
+      ansible.builtin.set_fact:
+        compose_cmd: >-
+          {{
+            'docker compose'
+            if docker_compose_v2.rc == 0
+            else 'docker-compose'
+          }}
+
+    - name: Stop if docker compose is missing
+      ansible.builtin.fail:
+        msg: "Neither 'docker compose' nor 'docker-compose' is available on {{ inventory_hostname }}"
+      when:
+        - docker_compose_v2.rc != 0
+        - docker_compose_v1.rc | default(1) != 0
+
+  tasks:
+    - name: Show current update target
+      ansible.builtin.debug:
+        msg: "Updating {{ inventory_hostname }} in {{ remnanode_dir }}"
+
+    - name: Pull latest images
+      ansible.builtin.command: "{{ compose_cmd }} pull"
+      args:
+        chdir: "{{ remnanode_dir }}"
+      when: compose_pull | bool
+
+    - name: Recreate containers
+      ansible.builtin.command: >-
+        {{ compose_cmd }} up -d
+        {{ '--remove-orphans' if compose_remove_orphans | bool else '' }}
+      args:
+        chdir: "{{ remnanode_dir }}"
+
+    - name: Wait after update
+      ansible.builtin.pause:
+        seconds: "{{ wait_after_update_seconds }}"
+
+    - name: Show running compose services
+      ansible.builtin.command: "{{ compose_cmd }} ps"
+      args:
+        chdir: "{{ remnanode_dir }}"
+      changed_when: false
+      register: compose_ps
+
+    - name: Print compose status
+      ansible.builtin.debug:
+        var: compose_ps.stdout_lines
+
+    - name: Prune unused docker images
+      ansible.builtin.command: docker image prune -f
+      changed_when: false
+      when: prune_images | default(false) | bool
