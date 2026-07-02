@@ -86,7 +86,7 @@
         update_cache: true
 
 - name: Install Docker Engine for RemnaNode hosts
-  hosts: docker_nodes
+  hosts: all
   become: true
   gather_facts: true
 
@@ -227,7 +227,7 @@
         state: started
 
 - name: Install RemnaNode Speedtest and host services
-  hosts: docker_nodes
+  hosts: all
   become: true
   gather_facts: true
 
@@ -416,7 +416,7 @@
       failed_when: false
 
 - name: Configure RemnaNode swap and sysctl tuning
-  hosts: docker_nodes
+  hosts: all
   become: true
   gather_facts: true
 
