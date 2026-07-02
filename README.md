@@ -20,3 +20,12 @@ ansible-playbook -i inventory.yml playbook/site.yml
 ```yaml
 speedtest_provider: yandex
 ```
+
+RemnaNode поддерживает два режима установки:
+
+```yaml
+remnanode_profile: plain        # обычный контейнер remnanode
+remnanode_profile: trojan_grpc  # remnanode + nginx + TLS + Trojan gRPC
+```
+
+Если `remnanode_profile` не указан, используется `trojan_grpc`.

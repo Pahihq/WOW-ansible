@@ -6,10 +6,15 @@
 
   vars:
     remnanode_dir: /opt/remnanode
+    remnanode_install_profile: "{{ remnanode_profile | default('trojan_grpc') }}"
 
     supported_distributions:
       - Debian
       - Ubuntu
+
+    remnanode_supported_profiles:
+      - plain
+      - trojan_grpc
 
   tasks:
     - name: Validate supported distribution
@@ -24,6 +29,14 @@
           {{ ansible_distribution_version }}
           {{ ansible_distribution_release | default('unknown') }}
 
+    - name: Validate RemnaNode install profile
+      ansible.builtin.assert:
+        that:
+          - remnanode_install_profile in remnanode_supported_profiles
+        fail_msg: >-
+          Unsupported remnanode_profile={{ remnanode_install_profile }}.
+          Use one of: {{ remnanode_supported_profiles | join(', ') }}.
+
     - name: Create RemnaNode directory
       ansible.builtin.file:
         path: "{{ remnanode_dir }}"
@@ -32,12 +45,79 @@
         group: root
         mode: "0755"
 
+- name: Install plain Remnawave Node Docker stack
+  hosts: docker_nodes
+  become: true
+  gather_facts: false
+
+  vars:
+    remnanode_install_profile: "{{ remnanode_profile | default('trojan_grpc') }}"
+    remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
+    remnanode_dir: /opt/remnanode
+    remnanode_api_port: 21412
+
+  pre_tasks:
+    - name: Skip plain RemnaNode install on non-plain profile
+      ansible.builtin.meta: end_host
+      when: remnanode_install_profile != 'plain'
+
+    - name: Check local Remnawave secret key file
+      ansible.builtin.stat:
+        path: "{{ remnanode_secret_key_file }}"
+      delegate_to: localhost
+      become: false
+      register: remnanode_secret_key_file_stat
+
+    - name: Fail if local secret key file is missing
+      ansible.builtin.assert:
+        that:
+          - remnanode_secret_key_file_stat.stat.exists
+        fail_msg: "Secret key file is missing: {{ remnanode_secret_key_file }}"
+
+    - name: Read local Remnawave secret key
+      ansible.builtin.set_fact:
+        remnanode_secret_key: "{{ lookup('ansible.builtin.file', remnanode_secret_key_file) | trim }}"
+      no_log: true
+
+    - name: Check Docker CLI
+      ansible.builtin.command: docker --version
+      changed_when: false
+
+    - name: Check Docker Compose plugin
+      ansible.builtin.command: docker compose version
+      changed_when: false
+
+  tasks:
+    - name: Write plain Remnawave Node compose file
+      ansible.builtin.template:
+        src: templates/remnanode-docker-compose.yml.j2
+        dest: "{{ remnanode_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      notify:
+        - Start plain Remnawave stack
+
+    - name: Show plain RemnaNode connection settings
+      ansible.builtin.debug:
+        msg:
+          - "Profile: plain"
+          - "API port: {{ remnanode_api_port }}"
+
+  handlers:
+    - name: Start plain Remnawave stack
+      ansible.builtin.command: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ remnanode_dir }}"
+
 - name: Install Trojan gRPC Docker stack for Remnawave Node
   hosts: docker_nodes
   become: true
   gather_facts: true
 
   vars:
+    remnanode_install_profile: "{{ remnanode_profile | default('trojan_grpc') }}"
     remnanode_domain: "{{ domain | default(node_domain | default(inventory_hostname)) }}"
     remnanode_email: admin@wowsecure.ru
     remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
@@ -55,6 +135,10 @@
     remnanode_api_port: 21412
 
   pre_tasks:
+    - name: Skip Trojan gRPC RemnaNode install on non-trojan profile
+      ansible.builtin.meta: end_host
+      when: remnanode_install_profile != 'trojan_grpc'
+
     - name: Check required inventory variables
       ansible.builtin.assert:
         that:
@@ -202,7 +286,7 @@
 
     - name: Write Remnawave Node compose file
       ansible.builtin.template:
-        src: templates/remnanode-docker-compose.yml.j2
+        src: templates/remnanode-docker-compose-trogan.yml.j2
         dest: "{{ remnanode_dir }}/docker-compose.yml"
         owner: root
         group: root
