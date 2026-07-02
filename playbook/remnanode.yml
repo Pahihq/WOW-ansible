@@ -6,7 +6,7 @@
 
   vars:
     remnanode_dir: /opt/remnanode
-    remnanode_install_profile: "{{ remnanode_profile | default('trojan_grpc') }}"
+    remnanode_install_profile: "{{ remnanode_profile | default('plain') }}"
 
     supported_distributions:
       - Debian
