@@ -28,4 +28,4 @@ remnanode_profile: plain        # обычный контейнер remnanode
 remnanode_profile: trojan_grpc  # remnanode + nginx + TLS + Trojan gRPC
 ```
 
-Если `remnanode_profile` не указан, используется `trojan_grpc`.
+Если `remnanode_profile` не указан, используется `plain`.

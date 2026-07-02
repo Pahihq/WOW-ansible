@@ -23,5 +23,5 @@ all:
           ansible_user: root
           monitoring_instance_name: node_01
           speedtest_provider: yandex
-          remnanode_profile: trojan_grpc
+          remnanode_profile: plain
           domain: node-01.example.com

@@ -51,7 +51,7 @@
   gather_facts: false
 
   vars:
-    remnanode_install_profile: "{{ remnanode_profile | default('trojan_grpc') }}"
+    remnanode_install_profile: "{{ remnanode_profile | default('plain') }}"
     remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
     remnanode_dir: /opt/remnanode
     remnanode_api_port: 21412
@@ -117,7 +117,7 @@
   gather_facts: true
 
   vars:
-    remnanode_install_profile: "{{ remnanode_profile | default('trojan_grpc') }}"
+    remnanode_install_profile: "{{ remnanode_profile | default('plain') }}"
     remnanode_domain: "{{ domain | default(node_domain | default(inventory_hostname)) }}"
     remnanode_email: admin@wowsecure.ru
     remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
