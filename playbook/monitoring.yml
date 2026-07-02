@@ -27,11 +27,6 @@
       - vmagent
       - speedtest-metrics.timer
 
-    monitoring_restart_services:
-      - cadvisor
-      - nodeexporter
-      - vmagent
-
     vmagent_scrape_targets:
       - name: cAdvisor
         job_name: integrations/cAdvisor
@@ -92,21 +87,6 @@
       ansible.builtin.hostname:
         name: "{{ monitoring_instance_name | lower | regex_replace('_', '-') }}"
 
-    - name: Install required packages
-      ansible.builtin.apt:
-        name:
-          - ca-certificates
-          - curl
-          - tar
-          - ncdu
-          - duf
-          - btop
-          - iotop
-          - jq
-          - python3-requests
-        state: present
-        update_cache: true
-
     - name: Create monitoring directories
       ansible.builtin.file:
         path: "{{ item }}"
@@ -121,18 +101,6 @@
         - "{{ vmagent_dir }}"
         - "{{ vmagent_conf_dir }}"
         - "{{ node_exporter_textfile_dir }}"
-
-    # =========================
-    # speedtest metrics
-    # =========================
-
-    - name: Install speedtest metrics script
-      ansible.builtin.copy:
-        src: files/speedtest_metrics.sh
-        dest: "{{ speedtest_metrics_script }}"
-        owner: root
-        group: root
-        mode: "0755"
 
     - name: Create speedtest metrics systemd service
       ansible.builtin.template:
@@ -153,6 +121,18 @@
         mode: "0644"
       notify:
         - Reload systemd
+
+    # =========================
+    # speedtest metrics
+    # =========================
+
+    - name: Install speedtest metrics script
+      ansible.builtin.copy:
+        src: files/speedtest_metrics.sh
+        dest: "{{ speedtest_metrics_script }}"
+        owner: root
+        group: root
+        mode: "0755"
 
     # =========================
     # cAdvisor
@@ -294,7 +274,9 @@
         label: "{{ item.name }}"
       notify:
         - Reload systemd
-        - Restart changed monitoring services
+        - Restart cadvisor
+        - Restart nodeexporter
+        - Restart vmagent
 
     - name: Force systemd reload before enabling services
       ansible.builtin.systemd:
@@ -332,11 +314,3 @@
         state: restarted
         enabled: true
         daemon_reload: true
-
-    - name: Restart changed monitoring services
-      ansible.builtin.systemd:
-        name: "{{ item }}"
-        state: restarted
-        enabled: true
-        daemon_reload: true
-      loop: "{{ monitoring_restart_services }}"
