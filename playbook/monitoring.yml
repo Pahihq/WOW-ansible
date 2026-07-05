@@ -83,9 +83,22 @@
         fail_msg: "Put vmagent remote write URL, username, and password into {{ vmagent_secrets_file }}"
 
   tasks:
+    - name: Define normalized host name
+      ansible.builtin.set_fact:
+        system_hostname: "{{ monitoring_instance_name | lower | regex_replace('_', '-') }}"
+
     - name: Set hostname from monitoring instance name
       ansible.builtin.hostname:
-        name: "{{ monitoring_instance_name | lower | regex_replace('_', '-') }}"
+        name: "{{ system_hostname }}"
+
+    - name: Add hostname to /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1\s+'
+        line: "127.0.1.1 {{ system_hostname }}"
+        owner: root
+        group: root
+        mode: "0644"
 
     - name: Create monitoring directories
       ansible.builtin.file:
