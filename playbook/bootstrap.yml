@@ -65,7 +65,9 @@
       - curl
       - git
       - gnupg
+      - locales
       - lsb-release
+      - nano
       - tar
       - unzip
       - zsh
@@ -84,6 +86,32 @@
         name: "{{ common_debian_packages }}"
         state: present
         update_cache: true
+
+    - name: Debian/Ubuntu | Enable en_US.UTF-8 locale
+      ansible.builtin.lineinfile:
+        path: /etc/locale.gen
+        regexp: '^#?\s*en_US\.UTF-8\s+UTF-8'
+        line: en_US.UTF-8 UTF-8
+        owner: root
+        group: root
+        mode: "0644"
+      register: en_us_locale_config
+
+    - name: Debian/Ubuntu | Generate en_US.UTF-8 locale
+      ansible.builtin.command: locale-gen en_US.UTF-8
+      changed_when: true
+      when: en_us_locale_config.changed
+
+    - name: Debian/Ubuntu | Check current default locale
+      ansible.builtin.command: awk -F= '$1 == "LANG" { gsub(/"/, "", $2); print $2 }' /etc/default/locale
+      register: default_locale_check
+      changed_when: false
+      failed_when: false
+
+    - name: Debian/Ubuntu | Set default locale to en_US.UTF-8
+      ansible.builtin.command: update-locale LANG=en_US.UTF-8
+      changed_when: true
+      when: default_locale_check.stdout != 'en_US.UTF-8'
 
 - name: Install Docker Engine for RemnaNode hosts
   hosts: all
