@@ -40,3 +40,4 @@ services:
       - SECRET_KEY={{ remnanode_secret_key }}
     volumes:
       - /dev/shm:/dev/shm:rw
+      - {{ remnanode_zapret_dat_path }}:/usr/local/bin/zapret.dat:ro
