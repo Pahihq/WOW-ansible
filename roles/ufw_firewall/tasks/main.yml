@@ -1,0 +1,68 @@
+---
+# ============================================================
+# ufw_firewall — основная логика
+# Порядок критичен: сначала ВСЕ allow (SSH первым),
+# только потом default deny + enable.
+# ============================================================
+
+- name: "Установить ufw и зависимости"
+  ansible.builtin.package:
+    name:
+      - ufw
+    state: present
+
+- name: "Детект динамических портов (SSH, NODE_PORT)"
+  ansible.builtin.import_tasks: detect.yml
+
+# --- 1. SSH — открываем ПЕРВЫМ, до любого deny ---
+- name: "ufw | allow SSH (детектированные порты)"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ ufw_ssh_detected_ports }}"
+  notify: reload ufw
+
+# --- 2. Клиентские порты xray + 80/443 — всем ---
+- name: "ufw | allow клиентские порты (0.0.0.0/0)"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: "{{ ufw_client_ports_proto }}"
+  loop: "{{ ufw_client_ports }}"
+  notify: reload ufw
+
+# --- 3. NODE_PORT — только с IP панели ---
+- name: "ufw | allow NODE_PORT только с IP панели"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ufw_node_port }}"
+    proto: tcp
+    from_ip: "{{ ufw_panel_ip }}"
+  when:
+    - ufw_node_port is defined
+    - (ufw_node_port | default('')) | length > 0
+  notify: reload ufw
+
+# --- 4. Логирование ---
+- name: "ufw | Настроить логирование"
+  community.general.ufw:
+    logging: "{{ ufw_logging }}"
+
+# --- 5. Политики по умолчанию (после всех allow!) ---
+- name: "ufw | default deny incoming"
+  community.general.ufw:
+    direction: incoming
+    policy: "{{ ufw_default_incoming }}"
+  notify: reload ufw
+
+- name: "ufw | default allow outgoing"
+  community.general.ufw:
+    direction: outgoing
+    policy: "{{ ufw_default_outgoing }}"
+  notify: reload ufw
+
+# --- 6. Включить ufw (в самом конце) ---
+- name: "ufw | Включить firewall"
+  community.general.ufw:
+    state: enabled

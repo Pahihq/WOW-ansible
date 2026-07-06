@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: ufw_firewall
+  description: >-
+    Настройка UFW на VPN-нодах remnawave: открывает клиентские порты xray,
+    SSH (с автодетектом порта) и NODE_PORT только с IP панели.
+  license: MIT
+  min_ansible_version: "2.12"
+  galaxy_tags:
+    - firewall
+    - ufw
+    - security
+    - vpn
+dependencies: []

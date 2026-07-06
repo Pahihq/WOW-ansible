@@ -1,0 +1,85 @@
+---
+# ============================================================
+# Детект динамических портов: SSH и NODE_PORT
+# ============================================================
+
+# --- SSH-порт: определяем реально слушающий порт sshd ---
+# Не хардкодим 22: при default deny + неверный порт = потеря доступа.
+# Берём 4-ю колонку (Local Address:Port) строк ss, где есть sshd.
+- name: "SSH | Извлечь порт(ы) sshd через ss"
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      ss -tlnHp 2>/dev/null
+      | awk '/sshd/ {print $4}'
+      | sed -E 's/.*:([0-9]+)$/\1/'
+      | sort -u
+  args:
+    executable: /bin/bash
+  register: ufw_ssh_ports
+  changed_when: false
+  check_mode: false
+
+- name: "SSH | Зафиксировать список найденных портов"
+  ansible.builtin.set_fact:
+    ufw_ssh_detected_ports: >-
+      {{ ufw_ssh_ports.stdout_lines
+         | map('trim')
+         | select('match', '^[0-9]+$')
+         | list }}
+
+- name: "SSH | Fallback на ansible_port/22, если детект пуст"
+  ansible.builtin.set_fact:
+    ufw_ssh_detected_ports: ["{{ ufw_ssh_port_fallback }}"]
+  when: ufw_ssh_detected_ports | length == 0
+
+- name: "SSH | Показать порты, которые будут открыты"
+  ansible.builtin.debug:
+    msg: "SSH-порты для allow: {{ ufw_ssh_detected_ports }}"
+
+# --- NODE_PORT: парсим из docker-compose ноды ---
+- name: "NODE_PORT | Найти существующий docker-compose"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ ufw_remnanode_compose_candidates }}"
+  register: ufw_compose_stats
+
+- name: "NODE_PORT | Зафиксировать первый найденный путь"
+  ansible.builtin.set_fact:
+    ufw_compose_path: >-
+      {{ (ufw_compose_stats.results
+          | selectattr('stat.exists', 'equalto', true)
+          | map(attribute='stat.path')
+          | list
+          | first) | default('') }}
+
+- name: "NODE_PORT | Извлечь значение из compose через grep"
+  ansible.builtin.shell:
+    cmd: >-
+      grep -oP 'NODE_PORT\s*=\s*\K[0-9]+' {{ ufw_compose_path | quote }}
+      | head -n1
+  register: ufw_node_port_raw
+  changed_when: false
+  check_mode: false
+  when: ufw_compose_path | length > 0
+
+- name: "NODE_PORT | Зафиксировать значение"
+  ansible.builtin.set_fact:
+    ufw_node_port: "{{ ufw_node_port_raw.stdout | default('') | trim }}"
+  when: ufw_compose_path | length > 0
+
+- name: "NODE_PORT | Fail, если compose есть, но порт не распарсился"
+  ansible.builtin.fail:
+    msg: >-
+      Не удалось извлечь NODE_PORT из {{ ufw_compose_path }}.
+      Проверь строку вида 'NODE_PORT=23412'.
+  when:
+    - ufw_compose_path | length > 0
+    - (ufw_node_port | default('')) | length == 0
+
+- name: "NODE_PORT | Предупреждение, если compose не найден"
+  ansible.builtin.debug:
+    msg: >-
+      docker-compose не найден ни по одному из путей
+      {{ ufw_remnanode_compose_candidates }} — правило для панели пропущено.
+  when: ufw_compose_path | length == 0

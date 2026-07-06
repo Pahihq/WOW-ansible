@@ -1,0 +1,8 @@
+---
+- name: "Настройка UFW на VPN-нодах"
+  hosts: docker_nodes
+  become: true
+  gather_facts: true
+
+  roles:
+    - ufw_firewall

@@ -1,0 +1,41 @@
+---
+# ============================================================
+# ufw_firewall — переменные по умолчанию
+# ============================================================
+
+# IP-адрес панели remnawave. Только с него разрешается доступ к NODE_PORT.
+ufw_panel_ip: "REMOVED_PANEL_IP"
+
+# Путь к docker-compose ноды remnawave, откуда парсится NODE_PORT.
+ufw_remnanode_compose_candidates:
+  - "/opt/remnanode/docker-compose.yml"
+  - "/opt/remnanode/docker-compose.yaml"
+
+# Клиентские порты xray — открываются всем (0.0.0.0/0).
+# Источник истины — конфиг-профиль панели, не config.json на диске
+# (на ноде его в чистом виде нет, он генерится внутри контейнера).
+# Здесь только inbound'ы, слушающие на 0.0.0.0. Порты на 127.0.0.1
+# (CDN_WS 8080, CDNYandex_v2 10085) наружу НЕ открываем.
+ufw_client_ports:
+  - 80      # nginx decoy / ACME HTTP-01 / TLS-вход
+  - 443     # TLS-вход / CDN-фронтинг / selfsteal
+  - 1234    # VH            (shadowsocks)
+  - 4443    # XHTTP_cdn_yandex
+  - 5443    # XHTTP_mws     (TLS)
+  - 8443    # VLESS gRPC Reality
+  - 9078    # VLESS_FREEDOM_IN (Reality)
+  - 9999    # BRIDGE_IN     (shadowsocks 2022)
+
+# Протокол для клиентских портов. shadowsocks и quic используют udp,
+# поэтому открываем оба — так проще и не ломает UDP-inbound'ы.
+ufw_client_ports_proto: "any"   # tcp | udp | any
+
+# Политики по умолчанию.
+ufw_default_incoming: "deny"
+ufw_default_outgoing: "allow"
+
+# Логирование ufw: off | low | medium | high | full
+ufw_logging: "low"
+
+# Fallback SSH-порт, если детект через ss не дал результата.
+ufw_ssh_port_fallback: "{{ ansible_port | default(22) }}"
