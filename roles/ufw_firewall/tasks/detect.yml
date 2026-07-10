@@ -62,28 +62,29 @@
           | map(attribute='stat.path')
           | list) }}
 
-- name: "NODE_PORT | Прочитать найденные docker-compose"
-  ansible.builtin.slurp:
-    src: "{{ item }}"
+- name: "NODE_PORT | Извлечь значения из docker-compose"
+  ansible.builtin.command:
+    argv:
+      - grep
+      - --only-matching
+      - --perl-regexp
+      - "^\\h*(?:-\\h*)?[\"']?NODE_PORT[\"']?\\h*(?:=|:)\\h*[\"']?\\K[0-9]{1,5}(?![0-9])"
+      - "{{ item }}"
   loop: "{{ ufw_compose_paths }}"
-  register: ufw_compose_files
-  no_log: true
+  register: ufw_node_port_scan
+  changed_when: false
+  failed_when: ufw_node_port_scan.rc not in [0, 1]
+  check_mode: false
 
 - name: "NODE_PORT | Инициализировать список найденных портов"
   ansible.builtin.set_fact:
     ufw_node_port_matches: []
 
-- name: "NODE_PORT | Извлечь значения из docker-compose"
+- name: "NODE_PORT | Собрать найденные порты"
   ansible.builtin.set_fact:
-    ufw_node_port_matches: >-
-      {{ ufw_node_port_matches
-         + ((item.content | b64decode)
-            | regex_findall("(?m)^[ \\t]*(?:-[ \\t]*)?[\"']?NODE_PORT[\"']?[ \\t]*(?:=|:)[ \\t]*[\"']?([0-9]{1,5})[\"']?(?:[ \\t]*#.*)?[ \\t]*$") ) }}
-  loop: >-
-    {{ ufw_compose_files.results
-       | selectattr('content', 'defined')
-       | list }}
-  no_log: true
+    ufw_node_port_matches: "{{ ufw_node_port_matches + item.stdout_lines }}"
+  loop: "{{ ufw_node_port_scan.results }}"
+  when: item.rc == 0
 
 - name: "NODE_PORT | Зафиксировать единственный найденный порт"
   ansible.builtin.set_fact:
