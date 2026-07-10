@@ -6,22 +6,40 @@ all:
   children:
     docker_panel:
       hosts:
-        panel_01:
+        panel_ge1:
           ansible_host: 203.0.113.10
           ansible_user: root
-          monitoring_instance_name: panel_01
+          monitoring_instance_name: panel_ge1
 
-        site_01:
+        site_ru1:
           ansible_host: 203.0.113.11
           ansible_user: root
-          monitoring_instance_name: site_01
+          monitoring_instance_name: site_ru1
 
     docker_nodes:
       hosts:
-        node_01:
+        node_ru1:
           ansible_host: 203.0.113.20
           ansible_user: root
-          monitoring_instance_name: node_01
+          monitoring_instance_name: node_ru1
           speedtest_provider: yandex
           remnanode_profile: plain
-          domain: node-01.example.com
+          domain: node-ru1.example.com
+
+        node_pl1:
+          ansible_host: 203.0.113.21
+          ansible_user: root
+          monitoring_instance_name: node_pl1
+          remnanode_profile: plain
+          domain: node-pl1.example.com
+          # Добавить порт к стандартному UFW-профилю этого хоста.
+          ufw_client_ports_override:
+            - 1080
+
+    ru_nodes:
+      hosts:
+        node_ru1:
+
+    eu_nodes:
+      hosts:
+        node_pl1:

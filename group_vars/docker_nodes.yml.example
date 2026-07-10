@@ -1,0 +1,6 @@
+---
+# Скопируй файл в group_vars/docker_nodes.yml и замени адреса.
+# group_vars/docker_nodes.yml игнорируется Git.
+ufw_panel_ips:
+  - "198.51.100.10"
+  - "198.51.100.11"
