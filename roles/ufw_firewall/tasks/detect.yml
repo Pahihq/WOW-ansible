@@ -69,13 +69,20 @@
   register: ufw_compose_files
   no_log: true
 
+- name: "NODE_PORT | Инициализировать список найденных портов"
+  ansible.builtin.set_fact:
+    ufw_node_port_matches: []
+
 - name: "NODE_PORT | Извлечь значения из docker-compose"
   ansible.builtin.set_fact:
     ufw_node_port_matches: >-
-      {{ (ufw_node_port_matches | default([]))
+      {{ ufw_node_port_matches
          + ((item.content | b64decode)
             | regex_findall("(?m)^[ \\t]*(?:-[ \\t]*)?[\"']?NODE_PORT[\"']?[ \\t]*(?:=|:)[ \\t]*[\"']?([0-9]{1,5})[\"']?(?:[ \\t]*#.*)?[ \\t]*$") ) }}
-  loop: "{{ ufw_compose_files.results }}"
+  loop: >-
+    {{ ufw_compose_files.results
+       | selectattr('content', 'defined')
+       | list }}
   no_log: true
 
 - name: "NODE_PORT | Зафиксировать единственный найденный порт"
