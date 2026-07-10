@@ -1,0 +1,14 @@
+---
+# UFW-профиль для хостов из inventory-группы ru_nodes.
+ufw_ru_profile:
+  client_ports:
+    - 80      # nginx decoy / ACME HTTP-01 / TLS-вход
+    - 443     # TLS-вход / CDN-фронтинг / selfsteal
+    - 37443   # VLESS_TCP_REALITY_RU_NL
+    - 56762   # VLESS_TCP_REALITY_USA
+    - 56763   # VLESS_TCP_REALITY_RU_FL
+    - 56764   # VLESS_TCP_REALITY_RU_PL
+    - 56765   # VLESS_TCP_REALITY_RU_LT
+    - 56766   # VLESS_TCP_REALITY_GE
+    - 56767   # VLESS_TCP_REALITY_CH
+    - 56768   # VLESS_TCP_REALITY_FR

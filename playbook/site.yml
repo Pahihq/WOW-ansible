@@ -33,6 +33,9 @@
       ansible.builtin.set_fact:
         orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['remnanode', 'remnanode_nginx'] }}"
 
+- name: Configure firewall
+  ansible.builtin.import_playbook: ufw.yml
+
 - name: Configure monitoring stack
   ansible.builtin.import_playbook: monitoring.yml
 

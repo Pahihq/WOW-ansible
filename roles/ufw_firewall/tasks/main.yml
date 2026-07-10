@@ -5,6 +5,51 @@
 # только потом default deny + enable.
 # ============================================================
 
+- name: "Проверить наличие IP-адресов Remnawave-панелей"
+  ansible.builtin.assert:
+    that:
+      - ufw_panel_ips | length > 0
+    fail_msg: >-
+      Задай ufw_panel_ips в локальном group_vars/docker_nodes.yml.
+
+- name: "Проверить IP-адреса Remnawave-панелей"
+  ansible.builtin.assert:
+    that:
+      - item | ansible.utils.ipaddr('address')
+    fail_msg: >-
+      Задай корректный список ufw_panel_ips
+      в локальном group_vars/docker_nodes.yml.
+  loop: "{{ ufw_panel_ips }}"
+
+- name: "Подключить UFW-профиль RU-нод"
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/vars/ru_nodes.yml"
+  when: "'ru_nodes' in group_names"
+
+- name: "Выбрать итоговый список клиентских портов"
+  ansible.builtin.set_fact:
+    ufw_effective_client_ports: >-
+      {{ ((ufw_ru_profile.client_ports
+           if ('ru_nodes' in group_names)
+           else ufw_client_ports)
+          + ufw_client_ports_override)
+         | unique | list }}
+
+- name: "Проверить, что список клиентских портов не пуст"
+  ansible.builtin.assert:
+    that:
+      - ufw_effective_client_ports | length > 0
+    fail_msg: "Итоговый список клиентских UFW-портов пуст."
+
+- name: "Проверить диапазон клиентских портов"
+  ansible.builtin.assert:
+    that:
+      - item | string is match('^[0-9]+$')
+      - item | int >= 1
+      - item | int <= 65535
+    fail_msg: "Некорректный клиентский порт: {{ item }}"
+  loop: "{{ ufw_effective_client_ports }}"
+
 - name: "Установить ufw и зависимости"
   ansible.builtin.package:
     name:
@@ -14,6 +59,29 @@
 - name: "Детект динамических портов (SSH, NODE_PORT)"
   ansible.builtin.import_tasks: detect.yml
 
+- name: "ufw | удалить устаревшие управляемые allow-правила"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: "{{ ufw_client_ports_proto }}"
+    delete: true
+  loop: "{{ ufw_managed_client_ports | difference(ufw_effective_client_ports) }}"
+
+- name: "ufw | удалить устаревшие NODE_PORT allow-правила"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.1 }}"
+    proto: tcp
+    from_ip: "{{ item.0 }}"
+    delete: true
+  loop: >-
+    {{ ufw_panel_ips
+       | product(ufw_managed_node_ports
+                 | difference([ufw_node_port | int]
+                              if (ufw_node_port | string | length > 0)
+                              else []))
+       | list }}
+
 # --- 1. SSH — открываем ПЕРВЫМ, до любого deny ---
 - name: "ufw | allow SSH (детектированные порты)"
   community.general.ufw:
@@ -21,7 +89,6 @@
     port: "{{ item }}"
     proto: tcp
   loop: "{{ ufw_ssh_detected_ports }}"
-  notify: reload ufw
 
 # --- 2. Клиентские порты xray + 80/443 — всем ---
 - name: "ufw | allow клиентские порты (0.0.0.0/0)"
@@ -29,20 +96,19 @@
     rule: allow
     port: "{{ item }}"
     proto: "{{ ufw_client_ports_proto }}"
-  loop: "{{ ufw_client_ports }}"
-  notify: reload ufw
+  loop: "{{ ufw_effective_client_ports }}"
 
 # --- 3. NODE_PORT — только с IP панели ---
-- name: "ufw | allow NODE_PORT только с IP панели"
+- name: "ufw | allow NODE_PORT только с IP панелей"
   community.general.ufw:
     rule: allow
     port: "{{ ufw_node_port }}"
     proto: tcp
-    from_ip: "{{ ufw_panel_ip }}"
+    from_ip: "{{ item }}"
+  loop: "{{ ufw_panel_ips }}"
   when:
     - ufw_node_port is defined
-    - (ufw_node_port | default('')) | length > 0
-  notify: reload ufw
+    - (ufw_node_port | default('') | string | length) > 0
 
 # --- 4. Логирование ---
 - name: "ufw | Настроить логирование"
@@ -54,13 +120,11 @@
   community.general.ufw:
     direction: incoming
     policy: "{{ ufw_default_incoming }}"
-  notify: reload ufw
 
 - name: "ufw | default allow outgoing"
   community.general.ufw:
     direction: outgoing
     policy: "{{ ufw_default_outgoing }}"
-  notify: reload ufw
 
 # --- 6. Включить ufw (в самом конце) ---
 - name: "ufw | Включить firewall"

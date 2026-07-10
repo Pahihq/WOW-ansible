@@ -3,8 +3,9 @@
 # ufw_firewall — переменные по умолчанию
 # ============================================================
 
-# IP-адрес панели remnawave. Только с него разрешается доступ к NODE_PORT.
-ufw_panel_ip: "REMOVED_PANEL_IP"
+# IP-адреса панелей remnawave задаются в локальном
+# group_vars/docker_nodes.yml, который не хранится в Git.
+ufw_panel_ips: []
 
 # Путь к docker-compose ноды remnawave, откуда парсится NODE_PORT.
 ufw_remnanode_compose_candidates:
@@ -19,7 +20,6 @@ ufw_remnanode_compose_candidates:
 ufw_client_ports:
   - 80      # nginx decoy / ACME HTTP-01 / TLS-вход
   - 443     # TLS-вход / CDN-фронтинг / selfsteal
-  - 1234    # VH            (shadowsocks)
   - 4443    # XHTTP_cdn_yandex
   - 5443    # XHTTP_mws     (TLS)
   - 8443    # VLESS gRPC Reality
@@ -29,6 +29,36 @@ ufw_client_ports:
 # Протокол для клиентских портов. shadowsocks и quic используют udp,
 # поэтому открываем оба — так проще и не ломает UDP-inbound'ы.
 ufw_client_ports_proto: "any"   # tcp | udp | any
+
+# Дополнительные порты из host_vars/group_vars.
+# Они добавляются к общему или RU-профилю, а не заменяют его.
+ufw_client_ports_override: []
+
+# Все порты, которыми управляет роль, включая устаревшие.
+ufw_managed_client_ports:
+  - 80
+  - 443
+  - 1234
+  - 4443
+  - 5443
+  - 8443
+  - 9078
+  - 9999
+  - 37443
+  - 56762
+  - 56763
+  - 56764
+  - 56765
+  - 56766
+  - 56767
+  - 56768
+
+# NODE_PORT из шаблонов этого репозитория; старые allow для панели удаляются.
+ufw_managed_node_ports:
+  - 21412
+
+# Защита от включения default deny без доступа панели к NODE_PORT.
+ufw_require_node_port: true
 
 # Политики по умолчанию.
 ufw_default_incoming: "deny"

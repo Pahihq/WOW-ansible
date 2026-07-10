@@ -18,6 +18,7 @@
     executable: /bin/bash
   register: ufw_ssh_ports
   changed_when: false
+  failed_when: false
   check_mode: false
 
 - name: "SSH | Зафиксировать список найденных портов"
@@ -33,6 +34,15 @@
     ufw_ssh_detected_ports: ["{{ ufw_ssh_port_fallback }}"]
   when: ufw_ssh_detected_ports | length == 0
 
+- name: "SSH | Проверить диапазон портов"
+  ansible.builtin.assert:
+    that:
+      - item | string is match('^[0-9]+$')
+      - item | int >= 1
+      - item | int <= 65535
+    fail_msg: "Некорректный SSH-порт: {{ item }}"
+  loop: "{{ ufw_ssh_detected_ports }}"
+
 - name: "SSH | Показать порты, которые будут открыты"
   ansible.builtin.debug:
     msg: "SSH-порты для allow: {{ ufw_ssh_detected_ports }}"
@@ -44,42 +54,69 @@
   loop: "{{ ufw_remnanode_compose_candidates }}"
   register: ufw_compose_stats
 
-- name: "NODE_PORT | Зафиксировать первый найденный путь"
+- name: "NODE_PORT | Зафиксировать все найденные compose-файлы"
   ansible.builtin.set_fact:
-    ufw_compose_path: >-
+    ufw_compose_paths: >-
       {{ (ufw_compose_stats.results
           | selectattr('stat.exists', 'equalto', true)
           | map(attribute='stat.path')
-          | list
-          | first) | default('') }}
+          | list) }}
 
-- name: "NODE_PORT | Извлечь значение из compose через grep"
-  ansible.builtin.shell:
-    cmd: >-
-      grep -oP 'NODE_PORT\s*=\s*\K[0-9]+' {{ ufw_compose_path | quote }}
-      | head -n1
-  register: ufw_node_port_raw
-  changed_when: false
-  check_mode: false
-  when: ufw_compose_path | length > 0
+- name: "NODE_PORT | Прочитать найденные docker-compose"
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop: "{{ ufw_compose_paths }}"
+  register: ufw_compose_files
+  no_log: true
 
-- name: "NODE_PORT | Зафиксировать значение"
+- name: "NODE_PORT | Извлечь значения из docker-compose"
   ansible.builtin.set_fact:
-    ufw_node_port: "{{ ufw_node_port_raw.stdout | default('') | trim }}"
-  when: ufw_compose_path | length > 0
+    ufw_node_port_matches: >-
+      {{ (ufw_node_port_matches | default([]))
+         + ((item.content | b64decode)
+            | regex_findall("(?m)^[ \\t]*(?:-[ \\t]*)?[\"']?NODE_PORT[\"']?[ \\t]*(?:=|:)[ \\t]*[\"']?([0-9]{1,5})[\"']?(?:[ \\t]*#.*)?[ \\t]*$") ) }}
+  loop: "{{ ufw_compose_files.results }}"
+  no_log: true
 
-- name: "NODE_PORT | Fail, если compose есть, но порт не распарсился"
+- name: "NODE_PORT | Зафиксировать единственный найденный порт"
+  ansible.builtin.set_fact:
+    ufw_node_port_candidates: "{{ ufw_node_port_matches | default([]) | unique | list }}"
+    ufw_node_port: >-
+      {{ ((ufw_node_port_matches | default([]) | unique | list | first)
+          if (ufw_node_port_matches | default([]) | unique | list | length == 1)
+          else '') }}
+
+- name: "NODE_PORT | Fail, если найдены разные порты"
   ansible.builtin.fail:
     msg: >-
-      Не удалось извлечь NODE_PORT из {{ ufw_compose_path }}.
-      Проверь строку вида 'NODE_PORT=23412'.
+      В compose-файлах {{ ufw_compose_paths }} найдены разные NODE_PORT:
+      {{ ufw_node_port_candidates }}. Оставь одно актуальное значение.
+  when: ufw_node_port_candidates | length > 1
+
+- name: "NODE_PORT | Проверить диапазон порта"
+  ansible.builtin.assert:
+    that:
+      - ufw_node_port | int >= 1
+      - ufw_node_port | int <= 65535
+    fail_msg: >-
+      Некорректный NODE_PORT={{ ufw_node_port }} в {{ ufw_compose_paths }}.
+      Ожидается порт от 1 до 65535.
+  when: (ufw_node_port | string | length) > 0
+
+- name: "NODE_PORT | Fail, если порт не найден"
+  ansible.builtin.fail:
+    msg: >-
+      Не удалось извлечь NODE_PORT из {{ ufw_compose_paths }}.
+      Проверь строку вида 'NODE_PORT=23412' или 'NODE_PORT: 23412'.
   when:
-    - ufw_compose_path | length > 0
-    - (ufw_node_port | default('')) | length == 0
+    - ufw_require_node_port | bool
+    - (ufw_node_port | default('') | string | length) == 0
 
 - name: "NODE_PORT | Предупреждение, если compose не найден"
   ansible.builtin.debug:
     msg: >-
       docker-compose не найден ни по одному из путей
       {{ ufw_remnanode_compose_candidates }} — правило для панели пропущено.
-  when: ufw_compose_path | length == 0
+  when:
+    - not (ufw_require_node_port | bool)
+    - ufw_compose_paths | length == 0
