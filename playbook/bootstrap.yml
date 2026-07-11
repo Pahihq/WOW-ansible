@@ -63,8 +63,10 @@
       - apt-transport-https
       - ca-certificates
       - curl
+      - expect
       - git
       - gnupg
+      - iperf3
       - locales
       - lsb-release
       - nano
@@ -79,6 +81,8 @@
       - nftables
       - python3-apt
       - python3-requests
+      - sysbench
+      - wget
 
   tasks:
     - name: Debian/Ubuntu | Install common packages

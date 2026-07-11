@@ -1,0 +1,96 @@
+---
+- name: Run Multitest on managed hosts and collect reports
+  hosts: all
+  become: true
+  gather_facts: true
+  # Multitest нагружает CPU, диск и сеть — запускаем только на одной ноде одновременно.
+  serial: 1
+  vars:
+    multitest_url: https://raw.githubusercontent.com/saveksme/multitest/master/multitest.sh
+    multitest_path: /usr/local/bin/multitest
+    multitest_report_dir: /var/log/multitest
+    multitest_report_path: "{{ multitest_report_dir }}/{{ inventory_hostname }}.txt"
+    multitest_local_report_dir: "{{ playbook_dir }}/../reports/multitest"
+    multitest_timeout_seconds: 10800
+
+  tasks:
+    - name: Download Multitest
+      ansible.builtin.get_url:
+        url: "{{ multitest_url }}"
+        dest: "{{ multitest_path }}"
+        owner: root
+        group: root
+        mode: "0755"
+        force: true
+
+    - name: Create remote report directory
+      ansible.builtin.file:
+        path: "{{ multitest_report_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Run all Multitest checks interactively and save output
+      ansible.builtin.shell: |
+        set -o pipefail
+        export MULTITEST_BIN={{ multitest_path | quote }}
+        export MULTITEST_LOG={{ multitest_report_path | quote }}
+        export MULTITEST_TIMEOUT={{ multitest_timeout_seconds | int }}
+
+        expect <<'EXPECT_EOF'
+        set timeout $env(MULTITEST_TIMEOUT)
+        log_user 1
+        log_file -noappend $env(MULTITEST_LOG)
+        spawn -noecho env TERM=xterm-256color $env(MULTITEST_BIN)
+
+        set started 0
+        expect {
+          -re {Выберите пункт \[0-12\]:} {
+            if {$started == 0} {
+              set started 1
+              send -- "11\r"
+              exp_continue
+            }
+            send -- "0\r"
+            exp_continue
+          }
+          -re {Enter.*запустить.*выход:} {
+            send -- "\r"
+            exp_continue
+          }
+          -re {Нажмите Enter для возврата в меню} {
+            send -- "\r"
+            exp_continue
+          }
+          eof {
+            catch wait result
+            exit [lindex $result 3]
+          }
+          timeout {
+            send_user "\nERROR: Multitest exceeded timeout $env(MULTITEST_TIMEOUT) seconds\n"
+            exit 124
+          }
+        }
+        EXPECT_EOF
+      args:
+        executable: /bin/bash
+      register: multitest_run
+      changed_when: true
+      # Отдельные внешние тесты иногда завершаются с ошибкой; лог всё равно нужно забрать.
+      failed_when: false
+
+    - name: Fetch Multitest report to controller
+      ansible.builtin.fetch:
+        src: "{{ multitest_report_path }}"
+        dest: "{{ multitest_local_report_dir }}/{{ inventory_hostname }}.txt"
+        flat: true
+
+    - name: Fail when Multitest itself did not complete
+      ansible.builtin.assert:
+        that:
+          - multitest_run.rc == 0
+        fail_msg: >-
+          Multitest on {{ inventory_hostname }} exited with code {{ multitest_run.rc }}.
+          The available report was saved to
+          {{ multitest_local_report_dir }}/{{ inventory_hostname }}.txt.
