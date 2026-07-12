@@ -38,11 +38,16 @@
         export MULTITEST_LOG={{ multitest_report_path | quote }}
         export MULTITEST_TIMEOUT={{ multitest_timeout_seconds | int }}
 
+        printf '\n\n===== Multitest run: %s | host: %s =====\n' \
+          "$(date --iso-8601=seconds)" \
+          {{ inventory_hostname | quote }} >> "$MULTITEST_LOG"
+
         expect <<'EXPECT_EOF'
         set timeout $env(MULTITEST_TIMEOUT)
         log_user 1
-        log_file -noappend $env(MULTITEST_LOG)
-        spawn -noecho env TERM=xterm-256color $env(MULTITEST_BIN)
+        log_file $env(MULTITEST_LOG)
+        # TERM=dumb не даёт команде clear записывать в отчёт коды очистки экрана.
+        spawn -noecho env TERM=dumb $env(MULTITEST_BIN)
 
         set started 0
         expect {
