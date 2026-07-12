@@ -1,5 +1,5 @@
 ---
-- name: Install monitoring stack | cAdvisor, node_exporter, vmagent
+- name: Установить стек мониторинга | cAdvisor, node_exporter, vmagent
   hosts: all
   become: true
 
@@ -53,24 +53,24 @@
     vmagent_url: "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v{{ vmagent_version }}/vmutils-linux-amd64-v{{ vmagent_version }}.tar.gz"
 
   pre_tasks:
-    - name: Use inventory hostname as default monitoring instance name
+    - name: Использовать имя хоста inventory как имя экземпляра мониторинга по умолчанию
       ansible.builtin.set_fact:
         monitoring_instance_name: "{{ monitoring_instance_name | default(inventory_hostname, true) }}"
 
-    - name: Check vmagent secrets file on controller
+    - name: Проверить файл секретов vmagent на управляющем хосте
       ansible.builtin.stat:
         path: "{{ vmagent_secrets_file }}"
       delegate_to: localhost
       become: false
       register: vmagent_secrets_file_stat
 
-    - name: Read vmagent secrets from controller file
+    - name: Прочитать секреты vmagent из файла управляющего хоста
       ansible.builtin.include_vars:
         file: "{{ vmagent_secrets_file }}"
       when: vmagent_secrets_file_stat.stat.exists
       no_log: true
 
-    - name: Validate vmagent secrets
+    - name: Проверить секреты vmagent
       ansible.builtin.assert:
         that:
           - vmagent_secrets_file_stat.stat.exists
@@ -80,18 +80,18 @@
           - vmagent_remote_write_username | length > 0
           - vmagent_remote_write_password is defined
           - vmagent_remote_write_password | length > 0
-        fail_msg: "Put vmagent remote write URL, username, and password into {{ vmagent_secrets_file }}"
+        fail_msg: "Укажите URL удалённой записи vmagent, имя пользователя и пароль в {{ vmagent_secrets_file }}"
 
   tasks:
-    - name: Define normalized host name
+    - name: Определить нормализованное имя хоста
       ansible.builtin.set_fact:
         system_hostname: "{{ monitoring_instance_name | lower | regex_replace('_', '-') }}"
 
-    - name: Set hostname from monitoring instance name
+    - name: Установить имя хоста из имени экземпляра мониторинга
       ansible.builtin.hostname:
         name: "{{ system_hostname }}"
 
-    - name: Add hostname to /etc/hosts
+    - name: Добавить имя хоста в /etc/hosts
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: '^127\.0\.1\.1\s+'
@@ -100,7 +100,7 @@
         group: root
         mode: "0644"
 
-    - name: Create monitoring directories
+    - name: Создать каталоги мониторинга
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -115,7 +115,7 @@
         - "{{ vmagent_conf_dir }}"
         - "{{ node_exporter_textfile_dir }}"
 
-    - name: Create speedtest metrics systemd service
+    - name: Создать systemd-сервис метрик speedtest
       ansible.builtin.template:
         src: templates/speedtest-metrics.service.j2
         dest: /etc/systemd/system/speedtest-metrics.service
@@ -123,9 +123,9 @@
         group: root
         mode: "0644"
       notify:
-        - Reload systemd
+        - Перезагрузить конфигурацию systemd
 
-    - name: Create speedtest metrics systemd timer
+    - name: Создать systemd-таймер метрик speedtest
       ansible.builtin.copy:
         src: files/speedtest-metrics.timer
         dest: /etc/systemd/system/speedtest-metrics.timer
@@ -133,13 +133,13 @@
         group: root
         mode: "0644"
       notify:
-        - Reload systemd
+        - Перезагрузить конфигурацию systemd
 
     # =========================
     # speedtest metrics
     # =========================
 
-    - name: Install speedtest metrics script
+    - name: Установить скрипт метрик speedtest
       ansible.builtin.copy:
         src: files/speedtest_metrics.sh
         dest: "{{ speedtest_metrics_script }}"
@@ -151,7 +151,7 @@
     # cAdvisor
     # =========================
 
-    - name: Download cAdvisor binary
+    - name: Скачать исполняемый файл cAdvisor
       ansible.builtin.get_url:
         url: "{{ cadvisor_url }}"
         dest: "{{ cadvisor_dir }}/cadvisor"
@@ -160,18 +160,18 @@
         mode: "0755"
         force: true
       notify:
-        - Restart cadvisor
+        - Перезапустить cadvisor
 
     # =========================
     # node_exporter
     # =========================
 
-    - name: Create temporary node_exporter install directory
+    - name: Удалить временный каталог установки node_exporter
       ansible.builtin.file:
         path: "{{ node_exporter_install_tmp }}"
         state: absent
 
-    - name: Recreate temporary node_exporter install directory
+    - name: Создать временный каталог установки node_exporter
       ansible.builtin.file:
         path: "{{ node_exporter_install_tmp }}"
         state: directory
@@ -179,13 +179,13 @@
         group: root
         mode: "0755"
 
-    - name: Download and unpack node_exporter
+    - name: Скачать и распаковать node_exporter
       ansible.builtin.unarchive:
         src: "{{ node_exporter_url }}"
         dest: "{{ node_exporter_install_tmp }}"
         remote_src: true
 
-    - name: Install node_exporter binary
+    - name: Установить исполняемый файл node_exporter
       ansible.builtin.copy:
         src: "{{ node_exporter_install_tmp }}/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
         dest: "{{ nodeexporter_dir }}/node_exporter"
@@ -194,9 +194,9 @@
         mode: "0755"
         remote_src: true
       notify:
-        - Restart nodeexporter
+        - Перезапустить nodeexporter
 
-    - name: Remove temporary node_exporter files
+    - name: Удалить временные файлы node_exporter
       ansible.builtin.file:
         path: "{{ node_exporter_install_tmp }}"
         state: absent
@@ -205,12 +205,12 @@
     # vmagent
     # =========================
 
-    - name: Remove temporary vmagent install directory
+    - name: Удалить временный каталог установки vmagent
       ansible.builtin.file:
         path: "{{ vmagent_install_tmp }}"
         state: absent
 
-    - name: Create temporary vmagent install directory
+    - name: Создать временный каталог установки vmagent
       ansible.builtin.file:
         path: "{{ vmagent_install_tmp }}"
         state: directory
@@ -218,13 +218,13 @@
         group: root
         mode: "0755"
 
-    - name: Download and unpack vmutils
+    - name: Скачать и распаковать vmutils
       ansible.builtin.unarchive:
         src: "{{ vmagent_url }}"
         dest: "{{ vmagent_install_tmp }}"
         remote_src: true
 
-    - name: Install vmagent binary
+    - name: Установить исполняемый файл vmagent
       ansible.builtin.copy:
         src: "{{ vmagent_install_tmp }}/vmagent-prod"
         dest: "{{ vmagent_dir }}/vmagent"
@@ -233,9 +233,9 @@
         mode: "0755"
         remote_src: true
       notify:
-        - Restart vmagent
+        - Перезапустить vmagent
 
-    - name: Remove temporary vmagent files
+    - name: Удалить временные файлы vmagent
       ansible.builtin.file:
         path: "{{ vmagent_install_tmp }}"
         state: absent
@@ -244,7 +244,7 @@
     # vmagent configs
     # =========================
 
-    - name: Create vmagent main scrape config
+    - name: Создать основной конфигурационный файл сбора метрик vmagent
       ansible.builtin.template:
         src: templates/vmagent-scrape.yml.j2
         dest: "{{ vmagent_dir }}/scrape.yml"
@@ -252,9 +252,9 @@
         group: root
         mode: "0644"
       notify:
-        - Restart vmagent
+        - Перезапустить vmagent
 
-    - name: Create vmagent target scrape configs
+    - name: Создать конфигурационные файлы целей vmagent
       ansible.builtin.template:
         src: templates/vmagent-targets.yml.j2
         dest: "{{ item.dest }}"
@@ -268,13 +268,13 @@
       loop_control:
         label: "{{ item.name }}"
       notify:
-        - Restart vmagent
+        - Перезапустить vmagent
 
     # =========================
     # systemd units
     # =========================
 
-    - name: Create monitoring systemd units
+    - name: Создать systemd-юниты мониторинга
       ansible.builtin.template:
         src: "{{ item.src }}"
         dest: "{{ item.dest }}"
@@ -286,16 +286,16 @@
       loop_control:
         label: "{{ item.name }}"
       notify:
-        - Reload systemd
-        - Restart cadvisor
-        - Restart nodeexporter
-        - Restart vmagent
+        - Перезагрузить конфигурацию systemd
+        - Перезапустить cadvisor
+        - Перезапустить nodeexporter
+        - Перезапустить vmagent
 
-    - name: Force systemd reload before enabling services
+    - name: Принудительно перезагрузить конфигурацию systemd перед включением сервисов
       ansible.builtin.systemd:
         daemon_reload: true
 
-    - name: Enable and start monitoring services
+    - name: Включить и запустить сервисы мониторинга
       ansible.builtin.systemd:
         name: "{{ item }}"
         enabled: true
@@ -303,25 +303,25 @@
       loop: "{{ monitoring_services }}"
 
   handlers:
-    - name: Reload systemd
+    - name: Перезагрузить конфигурацию systemd
       ansible.builtin.systemd:
         daemon_reload: true
 
-    - name: Restart cadvisor
+    - name: Перезапустить cadvisor
       ansible.builtin.systemd:
         name: cadvisor
         state: restarted
         enabled: true
         daemon_reload: true
 
-    - name: Restart nodeexporter
+    - name: Перезапустить nodeexporter
       ansible.builtin.systemd:
         name: nodeexporter
         state: restarted
         enabled: true
         daemon_reload: true
 
-    - name: Restart vmagent
+    - name: Перезапустить vmagent
       ansible.builtin.systemd:
         name: vmagent
         state: restarted

@@ -1,6 +1,6 @@
 ---
-- name: Run Multitest on managed hosts and collect reports
-  hosts: all
+- name: Запустить Multitest на управляемых хостах и собрать отчёты
+  hosts: docker_nodes
   become: true
   gather_facts: true
   # Multitest нагружает CPU, диск и сеть — запускаем только на одной ноде одновременно.
@@ -14,7 +14,7 @@
     multitest_timeout_seconds: 10800
 
   tasks:
-    - name: Download Multitest
+    - name: Скачать Multitest
       ansible.builtin.get_url:
         url: "{{ multitest_url }}"
         dest: "{{ multitest_path }}"
@@ -23,7 +23,7 @@
         mode: "0755"
         force: true
 
-    - name: Create remote report directory
+    - name: Создать каталог отчётов на удалённом хосте
       ansible.builtin.file:
         path: "{{ multitest_report_dir }}"
         state: directory
@@ -31,14 +31,14 @@
         group: root
         mode: "0755"
 
-    - name: Run all Multitest checks interactively and save output
+    - name: Запустить все проверки Multitest и сохранить вывод
       ansible.builtin.shell: |
         set -o pipefail
         export MULTITEST_BIN={{ multitest_path | quote }}
         export MULTITEST_LOG={{ multitest_report_path | quote }}
         export MULTITEST_TIMEOUT={{ multitest_timeout_seconds | int }}
 
-        printf '\n\n===== Multitest run: %s | host: %s =====\n' \
+        printf '\n\n===== Запуск Multitest: %s | хост: %s =====\n' \
           "$(date --iso-8601=seconds)" \
           {{ inventory_hostname | quote }} >> "$MULTITEST_LOG"
 
@@ -73,7 +73,7 @@
             exit [lindex $result 3]
           }
           timeout {
-            send_user "\nERROR: Multitest exceeded timeout $env(MULTITEST_TIMEOUT) seconds\n"
+            send_user "\nОШИБКА: Multitest превысил тайм-аут $env(MULTITEST_TIMEOUT) секунд\n"
             exit 124
           }
         }
@@ -85,17 +85,17 @@
       # Отдельные внешние тесты иногда завершаются с ошибкой; лог всё равно нужно забрать.
       failed_when: false
 
-    - name: Fetch Multitest report to controller
+    - name: Скачать отчёт Multitest на управляющий хост
       ansible.builtin.fetch:
         src: "{{ multitest_report_path }}"
         dest: "{{ multitest_local_report_dir }}/{{ inventory_hostname }}.txt"
         flat: true
 
-    - name: Fail when Multitest itself did not complete
+    - name: Проверить успешное завершение Multitest
       ansible.builtin.assert:
         that:
           - multitest_run.rc == 0
         fail_msg: >-
-          Multitest on {{ inventory_hostname }} exited with code {{ multitest_run.rc }}.
-          The available report was saved to
+          Multitest на хосте {{ inventory_hostname }} завершился с кодом
+          {{ multitest_run.rc }}. Доступный отчёт сохранён в файле
           {{ multitest_local_report_dir }}/{{ inventory_hostname }}.txt.

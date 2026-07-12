@@ -1,5 +1,5 @@
 ---
-- name: Rolling update remnanode docker compose
+- name: Последовательно обновить Docker Compose RemnaNode
   hosts: docker_nodes
   become: true
   gather_facts: false
@@ -12,34 +12,34 @@
     wait_after_update_seconds: 15
 
   pre_tasks:
-    - name: Check remnanode directory exists
+    - name: Проверить наличие каталога RemnaNode
       ansible.builtin.stat:
         path: "{{ remnanode_dir }}"
       register: remnanode_path
 
-    - name: Stop if remnanode directory is missing
+    - name: Остановить выполнение при отсутствии каталога RemnaNode
       ansible.builtin.fail:
-        msg: "{{ remnanode_dir }} does not exist on {{ inventory_hostname }}"
+        msg: "Каталог {{ remnanode_dir }} не существует на хосте {{ inventory_hostname }}"
       when: not remnanode_path.stat.isdir | default(false)
 
-    - name: Check docker is available
+    - name: Проверить доступность Docker
       ansible.builtin.command: docker --version
       changed_when: false
 
-    - name: Check docker compose v2 is available
+    - name: Проверить доступность Docker Compose v2
       ansible.builtin.command: docker compose version
       changed_when: false
       register: docker_compose_v2
       failed_when: false
 
-    - name: Check docker-compose v1 is available
+    - name: Проверить доступность docker-compose v1
       ansible.builtin.command: docker-compose --version
       changed_when: false
       register: docker_compose_v1
       failed_when: false
       when: docker_compose_v2.rc != 0
 
-    - name: Select compose command
+    - name: Выбрать команду Compose
       ansible.builtin.set_fact:
         compose_cmd: >-
           {{
@@ -48,47 +48,47 @@
             else 'docker-compose'
           }}
 
-    - name: Stop if docker compose is missing
+    - name: Остановить выполнение при отсутствии Docker Compose
       ansible.builtin.fail:
-        msg: "Neither 'docker compose' nor 'docker-compose' is available on {{ inventory_hostname }}"
+        msg: "На хосте {{ inventory_hostname }} недоступны ни 'docker compose', ни 'docker-compose'"
       when:
         - docker_compose_v2.rc != 0
         - docker_compose_v1.rc | default(1) != 0
 
   tasks:
-    - name: Show current update target
+    - name: Показать текущую цель обновления
       ansible.builtin.debug:
-        msg: "Updating {{ inventory_hostname }} in {{ remnanode_dir }}"
+        msg: "Обновление {{ inventory_hostname }} в каталоге {{ remnanode_dir }}"
 
-    - name: Pull latest images
+    - name: Скачать последние образы
       ansible.builtin.command: "{{ compose_cmd }} pull"
       args:
         chdir: "{{ remnanode_dir }}"
       when: compose_pull | bool
 
-    - name: Recreate containers
+    - name: Пересоздать контейнеры
       ansible.builtin.command: >-
         {{ compose_cmd }} up -d
         {{ '--remove-orphans' if compose_remove_orphans | bool else '' }}
       args:
         chdir: "{{ remnanode_dir }}"
 
-    - name: Wait after update
+    - name: Подождать после обновления
       ansible.builtin.pause:
         seconds: "{{ wait_after_update_seconds }}"
 
-    - name: Show running compose services
+    - name: Получить список запущенных сервисов Compose
       ansible.builtin.command: "{{ compose_cmd }} ps"
       args:
         chdir: "{{ remnanode_dir }}"
       changed_when: false
       register: compose_ps
 
-    - name: Print compose status
+    - name: Показать состояние Compose
       ansible.builtin.debug:
         var: compose_ps.stdout_lines
 
-    - name: Prune unused docker images
+    - name: Удалить неиспользуемые образы Docker
       ansible.builtin.command: docker image prune -f
       changed_when: false
       when: prune_images | default(false) | bool

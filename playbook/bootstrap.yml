@@ -1,5 +1,5 @@
 ---
-- name: Update Linux hosts without reboot
+- name: Обновить Linux-хосты без перезагрузки
   hosts: all
   become: true
   gather_facts: true
@@ -22,13 +22,13 @@
         - bionic
 
   pre_tasks:
-    - name: Refuse unsupported distribution
+    - name: Отклонить неподдерживаемый дистрибутив
       ansible.builtin.fail:
-        msg: "Unsupported distribution: {{ ansible_distribution }}"
+        msg: "Неподдерживаемый дистрибутив: {{ ansible_distribution }}"
       when: ansible_distribution not in supported_distributions
 
   tasks:
-    - name: Debian/Ubuntu | Update apt cache and upgrade packages without reboot
+    - name: Дебиан/Убунту | Обновите кэш apt и обновите пакеты без перезагрузки.
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
@@ -38,22 +38,22 @@
         DEBIAN_FRONTEND: noninteractive
         NEEDRESTART_SUSPEND: "1"
 
-    - name: Debian/Ubuntu | Check whether reboot is required
+    - name: Дебиан/Убунту | Проверьте, требуется ли перезагрузка
       ansible.builtin.stat:
         path: /var/run/reboot-required
       register: debian_reboot_required
       changed_when: false
 
-    - name: Report reboot requirement, but do not reboot
+    - name: Сообщить о необходимости перезагрузки, но не перезагружаться
       ansible.builtin.debug:
         msg: >-
-          {{ inventory_hostname }} updated.
-          Reboot required:
+          Хост {{ inventory_hostname }} обновлён.
+          Требуется перезагрузка:
           {{
             debian_reboot_required.stat.exists | default(false)
           }}
 
-- name: Install common host packages
+- name: Установите общие пакеты хоста
   hosts: all
   become: true
   gather_facts: true
@@ -85,13 +85,13 @@
       - wget
 
   tasks:
-    - name: Debian/Ubuntu | Install common packages
+    - name: Дебиан/Убунту | Установите общие пакеты
       ansible.builtin.apt:
         name: "{{ common_debian_packages }}"
         state: present
         update_cache: true
 
-    - name: Debian/Ubuntu | Enable en_US.UTF-8 locale
+    - name: Дебиан/Убунту | Включить локаль en_US.UTF-8
       ansible.builtin.lineinfile:
         path: /etc/locale.gen
         regexp: '^#?\s*en_US\.UTF-8\s+UTF-8'
@@ -101,23 +101,23 @@
         mode: "0644"
       register: en_us_locale_config
 
-    - name: Debian/Ubuntu | Generate en_US.UTF-8 locale
+    - name: Дебиан/Убунту | Создать локаль en_US.UTF-8
       ansible.builtin.command: locale-gen en_US.UTF-8
       changed_when: true
       when: en_us_locale_config.changed
 
-    - name: Debian/Ubuntu | Check current default locale
+    - name: Дебиан/Убунту | Проверить текущую локаль по умолчанию
       ansible.builtin.command: awk -F= '$1 == "LANG" { gsub(/"/, "", $2); print $2 }' /etc/default/locale
       register: default_locale_check
       changed_when: false
       failed_when: false
 
-    - name: Debian/Ubuntu | Set default locale to en_US.UTF-8
+    - name: Дебиан/Убунту | Установите локаль по умолчанию en_US.UTF-8.
       ansible.builtin.command: update-locale LANG=en_US.UTF-8
       changed_when: true
       when: default_locale_check.stdout != 'en_US.UTF-8'
 
-- name: Install Docker Engine for RemnaNode hosts
+- name: Установите Docker Engine для хостов RemnaNode.
   hosts: all
   become: true
   gather_facts: true
@@ -133,12 +133,12 @@
     repo_codename_fallbacks: *repo_codename_fallbacks
 
   tasks:
-    - name: Define Docker repository variables
+    - name: Определите переменные репозитория Docker
       ansible.builtin.set_fact:
         docker_repo_os: "{{ docker_repo_os_map[ansible_distribution] }}"
         repo_codename_candidates: "{{ ([ansible_distribution_release] + repo_codename_fallbacks[ansible_distribution]) | unique | list }}"
 
-    - name: Ensure apt keyrings directory exists
+    - name: Убедитесь, что каталог apt keyrings существует.
       ansible.builtin.file:
         path: /etc/apt/keyrings
         state: directory
@@ -146,13 +146,13 @@
         group: root
         mode: "0755"
 
-    - name: Check if official Docker package is installed
+    - name: Проверьте, установлен ли официальный пакет Docker
       ansible.builtin.command: dpkg-query -W -f='${Status}' docker-ce
       register: docker_ce_package_check
       changed_when: false
       failed_when: false
 
-    - name: Remove conflicting Docker packages
+    - name: Удалите конфликтующие пакеты Docker
       ansible.builtin.apt:
         name:
           - docker.io
@@ -164,13 +164,13 @@
         state: absent
       when: docker_ce_package_check.rc != 0
 
-    - name: Get dpkg architecture
+    - name: Получить архитектуру dpkg
       ansible.builtin.command: dpkg --print-architecture
       register: dpkg_arch
       changed_when: false
       when: docker_ce_package_check.rc != 0
 
-    - name: Check available Docker repositories
+    - name: Проверьте доступные репозитории Docker.
       ansible.builtin.uri:
         url: "https://download.docker.com/linux/{{ docker_repo_os }}/dists/{{ item }}/Release"
         method: GET
@@ -185,7 +185,7 @@
       failed_when: false
       when: docker_ce_package_check.rc != 0
 
-    - name: Select first available Docker repository codename
+    - name: Выберите первое доступное кодовое имя репозитория Docker.
       ansible.builtin.set_fact:
         docker_supported_codename: >-
           {{
@@ -200,18 +200,18 @@
           }}
       when: docker_ce_package_check.rc != 0
 
-    - name: Fail if no supported Docker repository codename was found
+    - name: Ошибка, если не найдено поддерживаемое кодовое имя репозитория Docker.
       ansible.builtin.fail:
         msg: >-
-          No supported Docker repository was found.
-          OS: {{ ansible_distribution }}
-          Repo OS: {{ docker_repo_os }}
-          Tried codenames: {{ repo_codename_candidates | join(', ') }}.
+          Поддерживаемый репозиторий Docker не найден.
+          ОС: {{ ansible_distribution }}.
+          ОС репозитория: {{ docker_repo_os }}.
+          Проверенные кодовые имена: {{ repo_codename_candidates | join(', ') }}.
       when:
         - docker_ce_package_check.rc != 0
         - docker_supported_codename | length == 0
 
-    - name: Download Docker official GPG key
+    - name: Загрузите официальный ключ GPG Docker
       ansible.builtin.get_url:
         url: "https://download.docker.com/linux/{{ docker_repo_os }}/gpg"
         dest: "{{ docker_keyring_path }}"
@@ -221,7 +221,7 @@
         force: true
       when: docker_ce_package_check.rc != 0
 
-    - name: Add Docker official repository
+    - name: Добавить официальный репозиторий Docker
       ansible.builtin.copy:
         dest: "{{ docker_sources_path }}"
         owner: root
@@ -236,12 +236,12 @@
           Signed-By: {{ docker_keyring_path }}
       when: docker_ce_package_check.rc != 0
 
-    - name: Update apt cache after adding Docker repo
+    - name: Обновить кеш apt после добавления репозитория Docker
       ansible.builtin.apt:
         update_cache: true
       when: docker_ce_package_check.rc != 0
 
-    - name: Install Docker Engine and Compose plugin
+    - name: Установите плагин Docker Engine и Compose.
       ansible.builtin.apt:
         name:
           - docker-ce
@@ -252,13 +252,13 @@
         state: present
       when: docker_ce_package_check.rc != 0
 
-    - name: Enable and start Docker
+    - name: Включите и запустите Docker
       ansible.builtin.systemd:
         name: docker
         enabled: true
         state: started
 
-- name: Install RemnaNode Speedtest and host services
+- name: Установите RemnaNode Speedtest и хост-сервисы.
   hosts: all
   become: true
   gather_facts: true
@@ -275,24 +275,24 @@
     repo_codename_fallbacks: *repo_codename_fallbacks
 
   tasks:
-    - name: Define Ookla repository variables
+    - name: Определите переменные репозитория Ookla
       ansible.builtin.set_fact:
         ookla_repo_os: "{{ ookla_repo_os_map[ansible_distribution] }}"
         repo_codename_candidates: "{{ ([ansible_distribution_release] + repo_codename_fallbacks[ansible_distribution]) | unique | list }}"
 
-    - name: Enable and start nftables
+    - name: Включить и запустить nftables
       ansible.builtin.systemd:
         name: nftables
         enabled: true
         state: started
 
-    - name: Check installed package for /usr/bin/speedtest
+    - name: Проверьте установленный пакет на наличие /usr/bin/speedtest.
       ansible.builtin.command: dpkg-query -S /usr/bin/speedtest
       register: speedtest_owner_check
       changed_when: false
       failed_when: false
 
-    - name: Remove conflicting distro speedtest-cli package
+    - name: Удалите конфликтующий пакет дистрибутива Speedtest-cli.
       ansible.builtin.apt:
         name: speedtest-cli
         state: absent
@@ -301,23 +301,23 @@
         speedtest_owner_check.rc == 0 and
         'speedtest-cli' in speedtest_owner_check.stdout
 
-    - name: Fix interrupted dpkg state
+    - name: Исправить прерванное состояние dpkg
       ansible.builtin.command: dpkg --configure -a
       changed_when: false
       failed_when: false
 
-    - name: Fix broken apt dependencies
+    - name: Исправить сломанные зависимости apt
       ansible.builtin.apt:
         state: fixed
       failed_when: false
 
-    - name: Check if official Ookla Speedtest package is installed
+    - name: Проверьте, установлен ли официальный пакет Ookla Speedtest.
       ansible.builtin.command: dpkg-query -W -f='${Status}' speedtest
       register: official_speedtest_package_check
       changed_when: false
       failed_when: false
 
-    - name: Find old/conflicting Ookla repository files
+    - name: Найдите старые/конфликтующие файлы репозитория Ookla.
       ansible.builtin.find:
         paths: /etc/apt/sources.list.d
         patterns:
@@ -327,14 +327,14 @@
       register: old_ookla_repo_files
       when: official_speedtest_package_check.rc != 0
 
-    - name: Remove old/conflicting Ookla repository files
+    - name: Удалите старые/конфликтующие файлы репозитория Ookla.
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: absent
       loop: "{{ old_ookla_repo_files.files | default([]) }}"
       when: official_speedtest_package_check.rc != 0
 
-    - name: Remove old/conflicting Ookla keyrings
+    - name: Удалите старые/конфликтующие брелоки Ookla.
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
@@ -344,7 +344,7 @@
         - /usr/share/keyrings/ookla_speedtest-cli-archive-keyring.gpg
       when: official_speedtest_package_check.rc != 0
 
-    - name: Clean apt cache after removing conflicting Ookla repo
+    - name: Очистите кеш apt после удаления конфликтующего репозитория Ookla.
       ansible.builtin.command: apt-get clean
       register: apt_clean_result
       retries: 20
@@ -352,7 +352,7 @@
       until: apt_clean_result.rc == 0
       changed_when: false
 
-    - name: Check available Ookla repositories
+    - name: Проверьте доступные репозитории Ookla
       ansible.builtin.uri:
         url: "https://packagecloud.io/ookla/speedtest-cli/{{ ookla_repo_os }}/dists/{{ item }}/Release"
         method: GET
@@ -367,7 +367,7 @@
       failed_when: false
       when: official_speedtest_package_check.rc != 0
 
-    - name: Select first available Ookla repository codename
+    - name: Выберите первое доступное кодовое имя репозитория Ookla.
       ansible.builtin.set_fact:
         ookla_supported_codename: >-
           {{
@@ -382,18 +382,18 @@
           }}
       when: official_speedtest_package_check.rc != 0
 
-    - name: Fail if no supported Ookla repository codename was found
+    - name: Ошибка, если не найдено поддерживаемое кодовое имя репозитория Ookla.
       ansible.builtin.fail:
         msg: >-
-          No supported Ookla Speedtest repository was found.
-          OS: {{ ansible_distribution }}
-          Repo OS: {{ ookla_repo_os }}
-          Tried codenames: {{ repo_codename_candidates | join(', ') }}.
+          Поддерживаемый репозиторий Ookla Speedtest не найден.
+          ОС: {{ ansible_distribution }}.
+          ОС репозитория: {{ ookla_repo_os }}.
+          Проверенные кодовые имена: {{ repo_codename_candidates | join(', ') }}.
       when:
         - official_speedtest_package_check.rc != 0
         - ookla_supported_codename | length == 0
 
-    - name: Download Ookla packagecloud GPG key as armored file
+    - name: Загрузите GPG-ключ Ookla packagecloud в виде бронированного файла.
       ansible.builtin.get_url:
         url: https://packagecloud.io/ookla/speedtest-cli/gpgkey
         dest: "{{ ookla_armored_key_path }}"
@@ -403,13 +403,13 @@
         force: true
       when: official_speedtest_package_check.rc != 0
 
-    - name: Convert Ookla GPG key to binary keyring
+    - name: Преобразование ключа Ookla GPG в бинарный брелок
       ansible.builtin.command:
         cmd: "gpg --dearmor -o {{ ookla_keyring_path }} {{ ookla_armored_key_path }}"
       changed_when: true
       when: official_speedtest_package_check.rc != 0
 
-    - name: Set Ookla keyring permissions
+    - name: Установите разрешения для ключей Ookla
       ansible.builtin.file:
         path: "{{ ookla_keyring_path }}"
         owner: root
@@ -417,7 +417,7 @@
         mode: "0644"
       when: official_speedtest_package_check.rc != 0
 
-    - name: Add Ookla Speedtest repository
+    - name: Добавить репозиторий Ookla Speedtest
       ansible.builtin.copy:
         dest: "{{ ookla_sources_path }}"
         owner: root
@@ -431,23 +431,23 @@
           Signed-By: {{ ookla_keyring_path }}
       when: official_speedtest_package_check.rc != 0
 
-    - name: Update apt cache after adding Ookla repo
+    - name: Обновить кэш apt после добавления репозитория Ookla
       ansible.builtin.apt:
         update_cache: true
       when: official_speedtest_package_check.rc != 0
 
-    - name: Install official Ookla Speedtest
+    - name: Установите официальный Ookla Speedtest
       ansible.builtin.apt:
         name: speedtest
         state: present
       when: official_speedtest_package_check.rc != 0
 
-    - name: Accept Ookla license and GDPR
+    - name: Примите лицензию Ookla и GDPR
       ansible.builtin.command: speedtest --accept-license --accept-gdpr
       changed_when: false
       failed_when: false
 
-- name: Configure RemnaNode swap and sysctl tuning
+- name: Настройка подкачки RemnaNode и настройка sysctl
   hosts: all
   become: true
   gather_facts: true
@@ -472,18 +472,18 @@
       net.ipv6.conf.default.disable_ipv6: "1"
       net.ipv6.conf.lo.disable_ipv6: "1"
   tasks:
-    - name: Check current active swap
+    - name: Проверить текущий активный своп
       ansible.builtin.command: swapon --show=NAME --noheadings
       register: active_swaps
       changed_when: false
       failed_when: false
 
-    - name: Check if swap file already exists
+    - name: Проверьте, существует ли уже файл подкачки
       ansible.builtin.stat:
         path: "{{ swap_file_path }}"
       register: swap_file_stat
 
-    - name: Get root filesystem size in MB
+    - name: Получить размер корневой файловой системы в МБ
       ansible.builtin.command: df -m --output=size /
       register: root_fs_size_mb_raw
       changed_when: false
@@ -491,7 +491,7 @@
         - active_swaps.stdout | trim == ""
         - not swap_file_stat.stat.exists
 
-    - name: Calculate swap size
+    - name: Рассчитать размер свопа
       ansible.builtin.set_fact:
         swap_size_mb: >-
           {{
@@ -504,14 +504,14 @@
         - active_swaps.stdout | trim == ""
         - not swap_file_stat.stat.exists
 
-    - name: Show calculated swap size
+    - name: Показать расчетный размер свопа
       ansible.builtin.debug:
         msg: "Swap не найден. Будет создан {{ swap_file_path }} размером {{ swap_size_mb }} MB"
       when:
         - active_swaps.stdout | trim == ""
         - not swap_file_stat.stat.exists
 
-    - name: Create swap file with fallocate
+    - name: Создать файл подкачки с помощью Fallocate
       ansible.builtin.command: "fallocate -l {{ swap_size_mb }}M {{ swap_file_path }}"
       register: swap_fallocate_result
       changed_when: swap_fallocate_result.rc == 0
@@ -520,7 +520,7 @@
         - active_swaps.stdout | trim == ""
         - not swap_file_stat.stat.exists
 
-    - name: Create swap file with dd if fallocate failed
+    - name: Создайте файл подкачки с помощью dd, если не удалось выполнить Fallocate.
       ansible.builtin.command: "dd if=/dev/zero of={{ swap_file_path }} bs=1M count={{ swap_size_mb }} status=none"
       changed_when: true
       when:
@@ -529,7 +529,7 @@
         - swap_fallocate_result.rc is defined
         - swap_fallocate_result.rc != 0
 
-    - name: Set swap file permissions
+    - name: Установите права доступа к файлу подкачки
       ansible.builtin.file:
         path: "{{ swap_file_path }}"
         owner: root
@@ -537,20 +537,20 @@
         mode: "0600"
       when: active_swaps.stdout | trim == ""
 
-    - name: Format swap file
+    - name: Форматировать файл подкачки
       ansible.builtin.command: "mkswap {{ swap_file_path }}"
       changed_when: true
       when:
         - active_swaps.stdout | trim == ""
         - not swap_file_stat.stat.exists
 
-    - name: Enable swap file
+    - name: Включить файл подкачки
       ansible.builtin.command: "swapon {{ swap_file_path }}"
       changed_when: true
       failed_when: false
       when: active_swaps.stdout | trim == ""
 
-    - name: Ensure swap file is present in fstab
+    - name: Убедитесь, что файл подкачки присутствует в fstab
       ansible.builtin.mount:
         name: none
         src: "{{ swap_file_path }}"
@@ -560,22 +560,22 @@
         passno: "0"
         state: present
 
-    - name: Show existing swap status
+    - name: Показать существующий статус обмена
       ansible.builtin.debug:
         msg: "Swap уже есть, ничего не делаю: {{ active_swaps.stdout_lines }}"
       when: active_swaps.stdout | trim != ""
 
-    - name: Show final swap status
+    - name: Показать окончательный статус обмена
       ansible.builtin.command: swapon --show
       register: swap_status
       changed_when: false
       failed_when: false
 
-    - name: Print final swap status
+    - name: Распечатать окончательный статус обмена
       ansible.builtin.debug:
         var: swap_status.stdout_lines
 
-    - name: Write sysctl optimization config
+    - name: Написать конфигурацию оптимизации sysctl
       ansible.builtin.copy:
         dest: "{{ sysctl_conf_path }}"
         owner: root
@@ -589,33 +589,33 @@
           {{ key }} = {{ value }}
           {% endfor %}
 
-    - name: Apply sysctl params immediately
+    - name: Немедленно применить параметры sysctl
       ansible.builtin.command: "sysctl -w {{ item.key }}={{ item.value }}"
       loop: "{{ sysctl_params | dict2items }}"
       changed_when: false
       failed_when: false
 
-    - name: Apply sysctl system config
+    - name: Применить конфигурацию системы sysctl
       ansible.builtin.command: sysctl --system
       changed_when: false
       failed_when: false
 
-    - name: Check current TCP congestion control
+    - name: Проверьте текущий контроль перегрузки TCP
       ansible.builtin.command: sysctl net.ipv4.tcp_congestion_control
       register: bbr_check
       changed_when: false
       failed_when: false
 
-    - name: Show BBR status
+    - name: Показать статус BBR
       ansible.builtin.debug:
         msg: >-
           {% if 'bbr' in bbr_check.stdout %}
           BBR активен + sysctl оптимизирован
           {% else %}
-          BBR НЕ активен. Текущее значение: {{ bbr_check.stdout | default('unknown') }}
+          BBR НЕ активен. Текущее значение: {{ bbr_check.stdout | default('неизвестно') }}
           {% endif %}
 
-- name: Install and configure zsh with oh-my-zsh and powerlevel10k
+- name: Установите и настройте zsh с помощью oh-my-zsh и powerlevel10k.
   hosts: all
   gather_facts: true
   become: true
@@ -687,27 +687,27 @@
         dest: "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
 
   pre_tasks:
-    - name: Read target user account data
+    - name: Чтение данных целевой учетной записи пользователя
       ansible.builtin.getent:
         database: passwd
         key: "{{ zsh_target_user }}"
 
-    - name: Save target user paths
+    - name: Сохранять целевые пути пользователей
       ansible.builtin.set_fact:
         zsh_target_gid: "{{ getent_passwd[zsh_target_user][2] }}"
         zsh_target_home: "{{ getent_passwd[zsh_target_user][4] }}"
 
-    - name: Select stable p10k theme by hostname
+    - name: Выберите стабильную тему p10k по имени хоста
       ansible.builtin.set_fact:
         p10k_theme: "{{ p10k_themes[(inventory_hostname | hash('md5') | int(base=16)) % (p10k_themes | length)] }}"
 
   tasks:
-    - name: Find zsh binary
+    - name: Найти двоичный файл zsh
       ansible.builtin.shell: command -v zsh
       register: zsh_binary
       changed_when: false
 
-    - name: Add zsh to /etc/shells
+    - name: Добавьте zsh в /etc/shells
       ansible.builtin.lineinfile:
         path: /etc/shells
         line: "{{ zsh_binary.stdout }}"
@@ -715,17 +715,17 @@
         create: true
         mode: "0644"
 
-    - name: Check existing oh-my-zsh directory
+    - name: Проверьте существующий каталог oh-my-zsh
       ansible.builtin.stat:
         path: "{{ zsh_target_home }}/.oh-my-zsh"
       register: ohmyzsh_dir
 
-    - name: Check existing oh-my-zsh git repository
+    - name: Проверьте существующий git-репозиторий oh-my-zsh.
       ansible.builtin.stat:
         path: "{{ zsh_target_home }}/.oh-my-zsh/.git"
       register: ohmyzsh_git
 
-    - name: Install oh-my-zsh if missing
+    - name: Установите oh-my-zsh, если он отсутствует.
       ansible.builtin.git:
         repo: https://github.com/ohmyzsh/ohmyzsh.git
         dest: "{{ zsh_target_home }}/.oh-my-zsh"
@@ -735,14 +735,14 @@
         force: false
       when: not ohmyzsh_dir.stat.exists
 
-    - name: Skip existing non-git oh-my-zsh directory
+    - name: Пропустить существующий каталог oh-my-zsh, отличный от git.
       ansible.builtin.debug:
-        msg: "oh-my-zsh already exists and is not a git repo, not overwriting: {{ zsh_target_home }}/.oh-my-zsh"
+        msg: "oh-my-zsh уже существует и не является Git-репозиторием; каталог не будет перезаписан: {{ zsh_target_home }}/.oh-my-zsh"
       when:
         - ohmyzsh_dir.stat.exists
         - not ohmyzsh_git.stat.exists
 
-    - name: Ensure oh-my-zsh custom directories exist
+    - name: Убедитесь, что существуют пользовательские каталоги oh-my-zsh.
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -753,13 +753,13 @@
         - "{{ zsh_target_home }}/.oh-my-zsh/custom/themes"
         - "{{ zsh_target_home }}/.oh-my-zsh/custom/plugins"
 
-    - name: Check existing zsh git components
+    - name: Проверьте существующие компоненты zsh git
       ansible.builtin.stat:
         path: "{{ item.dest }}"
       loop: "{{ zsh_git_components }}"
       register: zsh_git_component_stats
 
-    - name: Install missing zsh git components
+    - name: Установите недостающие компоненты zsh git
       ansible.builtin.git:
         repo: "{{ item.item.repo }}"
         dest: "{{ item.item.dest }}"
@@ -772,12 +772,12 @@
         label: "{{ item.item.name }}"
       when: not item.stat.exists
 
-    - name: Check existing .zshrc
+    - name: Проверьте существующий .zshrc
       ansible.builtin.stat:
         path: "{{ zsh_target_home }}/.zshrc"
       register: zshrc_file
 
-    - name: Copy .zshrc if missing
+    - name: Скопируйте .zshrc, если он отсутствует.
       ansible.builtin.copy:
         src: "{{ zshrc_source_file }}"
         dest: "{{ zsh_target_home }}/.zshrc"
@@ -786,7 +786,7 @@
         mode: "0644"
       when: not zshrc_file.stat.exists
 
-    - name: Set powerlevel10k theme in .zshrc
+    - name: Установить тему powerlevel10k в .zshrc
       ansible.builtin.lineinfile:
         path: "{{ zsh_target_home }}/.zshrc"
         regexp: '^ZSH_THEME='
@@ -795,12 +795,12 @@
         group: "{{ zsh_target_gid }}"
         mode: "0644"
 
-    - name: Check existing .p10k.zsh
+    - name: Проверьте существующий .p10k.zsh
       ansible.builtin.stat:
         path: "{{ zsh_target_home }}/.p10k.zsh"
       register: p10k_file
 
-    - name: Copy .p10k.zsh if missing
+    - name: Скопируйте .p10k.zsh, если он отсутствует.
       ansible.builtin.copy:
         src: "{{ p10k_source_file }}"
         dest: "{{ zsh_target_home }}/.p10k.zsh"
@@ -809,7 +809,7 @@
         mode: "0644"
       when: not p10k_file.stat.exists
 
-    - name: Apply selected p10k host theme colors
+    - name: Применить выбранные цвета темы хоста p10k
       ansible.builtin.blockinfile:
         path: "{{ zsh_target_home }}/.p10k.zsh"
         marker: "# {mark} ANSIBLE MANAGED P10K HOST THEME"
@@ -842,7 +842,7 @@
           typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VIINS_BACKGROUND={{ p10k_theme.error_background }}
           typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VICMD_BACKGROUND={{ p10k_theme.error_background }}
 
-    - name: Source .p10k.zsh from .zshrc
+    - name: Источник .p10k.zsh из .zshrc
       ansible.builtin.lineinfile:
         path: "{{ zsh_target_home }}/.zshrc"
         line: '[[ ! -f "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"'
@@ -852,19 +852,19 @@
         group: "{{ zsh_target_gid }}"
         mode: "0644"
 
-    - name: Set zsh as default shell
+    - name: Установить zsh в качестве оболочки по умолчанию
       ansible.builtin.user:
         name: "{{ zsh_target_user }}"
         shell: "{{ zsh_binary.stdout }}"
 
-    - name: Fix oh-my-zsh ownership
+    - name: Исправление владения oh-my-zsh
       ansible.builtin.file:
         path: "{{ zsh_target_home }}/.oh-my-zsh"
         owner: "{{ zsh_target_user }}"
         group: "{{ zsh_target_gid }}"
         recurse: true
 
-    - name: Fix config files ownership
+    - name: Исправить владение файлами конфигурации
       ansible.builtin.file:
         path: "{{ item }}"
         owner: "{{ zsh_target_user }}"
@@ -874,11 +874,11 @@
         - "{{ zsh_target_home }}/.zshrc"
         - "{{ zsh_target_home }}/.p10k.zsh"
 
-    - name: Show selected theme
+    - name: Показать выбранную тему
       ansible.builtin.debug:
-        msg: "Selected p10k theme for {{ inventory_hostname }}: {{ p10k_theme.name }}"
+        msg: "Выбранная тема p10k для {{ inventory_hostname }}: {{ p10k_theme.name }}"
 
-- name: Configure WOWVPN neon SSH MOTD and SSH authentication
+- name: Настройте WOWVPN neon SSH MOTD и аутентификацию SSH.
   hosts: all
   become: true
   gather_facts: true
@@ -889,35 +889,35 @@
     root_authorized_keys_file: "{{ playbook_dir }}/secrets/root_authorized_keys.pub"
 
   pre_tasks:
-    - name: Check root authorized key file on controller
+    - name: Проверьте файл авторизованного ключа root на контроллере
       ansible.builtin.stat:
         path: "{{ root_authorized_keys_file }}"
       delegate_to: localhost
       become: false
       register: root_authorized_keys_file_stat
 
-    - name: Read root authorized key from controller file
+    - name: Чтение корневого авторизованного ключа из файла контроллера
       ansible.builtin.set_fact:
         root_authorized_key: "{{ lookup('ansible.builtin.file', root_authorized_keys_file) | trim }}"
       delegate_to: localhost
       become: false
       when: root_authorized_keys_file_stat.stat.exists
 
-    - name: Validate root authorized key
+    - name: Подтвердить корневой авторизованный ключ
       ansible.builtin.assert:
         that:
           - root_authorized_keys_file_stat.stat.exists
           - root_authorized_key is defined
           - root_authorized_key | length > 0
-        fail_msg: "Put root SSH public key into {{ root_authorized_keys_file }}"
+        fail_msg: "Поместите открытый SSH-ключ root в {{ root_authorized_keys_file }}"
 
   tasks:
-    - name: Check update-motd directory
+    - name: Проверьте каталог update-motd
       ansible.builtin.stat:
         path: /etc/update-motd.d
       register: update_motd_dir
 
-    - name: Find executable default Debian MOTD scripts
+    - name: Найдите исполняемые сценарии Debian MOTD по умолчанию.
       ansible.builtin.find:
         paths: /etc/update-motd.d
         file_type: file
@@ -926,7 +926,7 @@
       register: default_motd_scripts
       when: update_motd_dir.stat.isdir | default(false)
 
-    - name: Disable executable default Debian MOTD scripts if needed
+    - name: При необходимости отключите исполняемые сценарии Debian MOTD по умолчанию.
       ansible.builtin.file:
         path: "{{ item.path }}"
         mode: "0644"
@@ -935,7 +935,7 @@
         - item.mode is defined
         - (item.mode[-3:] | regex_search('[1357]')) is not none
 
-    - name: Create WOWVPN neon MOTD
+    - name: Создать неоновый MOTD WOWVPN
       ansible.builtin.template:
         src: templates/wowvpn-motd.sh.j2
         dest: "{{ ssh_motd_script }}"
@@ -943,7 +943,7 @@
         group: root
         mode: "0755"
 
-    - name: Find extra sshd config files
+    - name: Найдите дополнительные файлы конфигурации sshd
       ansible.builtin.find:
         paths: /etc/ssh/sshd_config.d
         patterns: "*.conf"
@@ -951,14 +951,14 @@
       register: sshd_extra_configs
       failed_when: false
 
-    - name: Read extra sshd config files
+    - name: Прочтите дополнительные файлы конфигурации sshd.
       ansible.builtin.slurp:
         src: "{{ item.path }}"
       loop: "{{ sshd_extra_configs.files | default([]) }}"
       register: sshd_extra_config_contents
       when: sshd_extra_configs.matched | default(0) | int > 0
 
-    - name: Remove only truly conflicting sshd config snippets
+    - name: Удалите только действительно конфликтующие фрагменты конфигурации sshd.
       ansible.builtin.file:
         path: "{{ item.source }}"
         state: absent
@@ -971,9 +971,9 @@
           or (item.content | b64decode) is search('(?im)^\\s*PermitRootLogin\\s+(no|prohibit-password|without-password)\\s*$')
           or (item.content | b64decode) is search('(?im)^\\s*AuthenticationMethods\\s+.*$')
         )
-      notify: Restart ssh service
+      notify: Перезапустить службу SSH
 
-    - name: Remove old SSH authentication directives from main config
+    - name: Удалите старые директивы аутентификации SSH из основной конфигурации.
       ansible.builtin.lineinfile:
         path: "{{ sshd_config_path }}"
         regexp: "{{ item }}"
@@ -995,9 +995,9 @@
         - '^\s*DebianBanner\s+.*$'
         - '^\s*PrintMotd\s+.*$'
         - '^\s*PrintLastLog\s+.*$'
-      notify: Restart ssh service
+      notify: Перезапустить службу SSH
 
-    - name: Configure SSH authentication policy
+    - name: Настройка политики аутентификации SSH
       ansible.builtin.blockinfile:
         path: "{{ sshd_config_path }}"
         marker: "# {mark} ANSIBLE MANAGED SSH AUTH POLICY"
@@ -1044,21 +1044,21 @@
 
           # Time allowed for login
           LoginGraceTime 30
-      notify: Restart ssh service
+      notify: Перезапустить службу SSH
 
-    - name: Validate sshd config
+    - name: Проверьте конфигурацию sshd
       ansible.builtin.command: sshd -t
       changed_when: false
 
-    - name: Disable default pam_motd output
+    - name: Отключить вывод pam_motd по умолчанию
       ansible.builtin.replace:
         path: /etc/pam.d/sshd
         regexp: '^(session\s+optional\s+pam_motd\.so.*)$'
         replace: '# \1'
         backup: true
-      notify: Restart ssh service
+      notify: Перезапустить службу SSH
 
-    - name: Show WOWVPN MOTD directly on SSH login
+    - name: Показывать WOWVPN MOTD непосредственно при входе в систему по SSH
       ansible.builtin.lineinfile:
         path: /etc/pam.d/sshd
         regexp: '^session\s+optional\s+pam_exec\.so\s+stdout\s+/usr/bin/run-parts\s+/etc/update-motd\.d$'
@@ -1066,9 +1066,9 @@
         insertbefore: '^#?\s*session\s+optional\s+pam_motd\.so'
         state: present
         backup: true
-      notify: Restart ssh service
+      notify: Перезапустить службу SSH
 
-    - name: Ensure root .ssh directory exists
+    - name: Убедитесь, что корневой каталог .ssh существует.
       ansible.builtin.file:
         path: /root/.ssh
         state: directory
@@ -1076,14 +1076,14 @@
         group: root
         mode: '0700'
 
-    - name: Add SSH public key to root authorized_keys
+    - name: Добавьте открытый ключ SSH в корневой авторизованный ключ.
       ansible.builtin.authorized_key:
         user: root
         state: present
         key: "{{ root_authorized_key }}"
 
   handlers:
-    - name: Restart ssh service
+    - name: Перезапустить службу SSH
       ansible.builtin.service:
         name: ssh
         state: restarted

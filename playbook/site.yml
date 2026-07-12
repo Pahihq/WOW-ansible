@@ -1,51 +1,51 @@
 ---
-- name: Prepare orchestration state
+- name: Подготовить состояние оркестрации
   hosts: all
   gather_facts: false
   tasks:
-    - name: Initialize completed playbook list
+    - name: Инициализировать список завершённых playbook
       ansible.builtin.set_fact:
         orchestration_playbooks_done: []
 
-    - name: Use inventory hostname as default monitoring instance name
+    - name: Использовать имя хоста inventory как имя экземпляра мониторинга по умолчанию
       ansible.builtin.set_fact:
         monitoring_instance_name: "{{ monitoring_instance_name | default(inventory_hostname, true) }}"
 
-- name: Bootstrap hosts
+- name: Выполнить базовую настройку хостов
   ansible.builtin.import_playbook: bootstrap.yml
 
-- name: Mark bootstrap playbooks completed
+- name: Отметить базовую настройку завершённой
   hosts: all
   gather_facts: false
   tasks:
-    - name: Add bootstrap playbooks to completed list
+    - name: Добавить базовую настройку в список завершённых playbook
       ansible.builtin.set_fact:
         orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['system_update', 'zsh', 'ssh'] }}"
 
-- name: Configure RemnaNode
+- name: Настроить RemnaNode
   ansible.builtin.import_playbook: remnanode.yml
 
-- name: Mark RemnaNode playbooks completed
+- name: Отметить настройку RemnaNode завершённой
   hosts: docker_nodes
   gather_facts: false
   tasks:
-    - name: Add RemnaNode playbooks to completed list
+    - name: Добавить настройку RemnaNode в список завершённых playbook
       ansible.builtin.set_fact:
         orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['remnanode', 'remnanode_nginx'] }}"
 
-- name: Configure firewall
+- name: Настроить межсетевой экран
   ansible.builtin.import_playbook: ufw.yml
 
-- name: Configure monitoring stack
+- name: Настроить стек мониторинга
   ansible.builtin.import_playbook: monitoring.yml
 
-- name: Mark monitoring playbook completed
+- name: Отметить настройку мониторинга завершённой
   hosts: all
   gather_facts: false
   tasks:
-    - name: Add monitoring playbook to completed list
+    - name: Добавить настройку мониторинга в список завершённых playbook
       ansible.builtin.set_fact:
         orchestration_playbooks_done: "{{ orchestration_playbooks_done + ['monitoring'] }}"
 
-- name: Update reporting
+- name: Обновить отчётность
   ansible.builtin.import_playbook: reporting.yml
