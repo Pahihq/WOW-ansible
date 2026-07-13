@@ -38,6 +38,14 @@
         export MULTITEST_LOG={{ multitest_report_path | quote }}
         export MULTITEST_TIMEOUT={{ multitest_timeout_seconds | int }}
 
+        # Multitest вызывает clear при каждом показе меню. Подменяем его на no-op,
+        # чтобы управляющие последовательности очистки не портили текстовый отчёт.
+        MULTITEST_SHIM_DIR="$(mktemp -d)"
+        trap 'rm -rf "$MULTITEST_SHIM_DIR"' EXIT
+        printf '#!/bin/sh\nexit 0\n' > "$MULTITEST_SHIM_DIR/clear"
+        chmod 0755 "$MULTITEST_SHIM_DIR/clear"
+        export PATH="$MULTITEST_SHIM_DIR:$PATH"
+
         printf '\n\n===== Запуск Multitest: %s | хост: %s =====\n' \
           "$(date --iso-8601=seconds)" \
           {{ inventory_hostname | quote }} >> "$MULTITEST_LOG"
@@ -45,8 +53,9 @@
         expect <<'EXPECT_EOF'
         set timeout $env(MULTITEST_TIMEOUT)
         log_user 1
-        log_file $env(MULTITEST_LOG)
-        # TERM=dumb не даёт команде clear записывать в отчёт коды очистки экрана.
+        # Без -a Expect обнуляет существующий отчёт при каждом запуске.
+        log_file -a $env(MULTITEST_LOG)
+        # TERM=dumb дополнительно сокращает терминальные управляющие последовательности.
         spawn -noecho env TERM=dumb $env(MULTITEST_BIN)
 
         set started 0
