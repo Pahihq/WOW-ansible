@@ -24,7 +24,7 @@ logs/
 *.log
 
 # Generated reports and temporary files
-playbook/reports/
+reports/
 tmp/
 temp/
 *.tmp
