@@ -1,0 +1,219 @@
+---
+- name: Установка маскирующих xHTTP-сайтов на ноды
+  hosts: eu_nodes
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/xhttp_nodes.yml
+
+  pre_tasks:
+    - name: Проверка семейства ОС Debian
+      ansible.builtin.assert:
+        that: ansible_facts.os_family == 'Debian'
+        fail_msg: Этот плейбук поддерживает только Debian и Ubuntu.
+
+    - name: Проверка уникальности назначений для нод
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | map('extract', hostvars, 'domain') | list | unique | length == ansible_play_hosts_all | length
+          - ansible_play_hosts_all | length <= available_site_variants | length
+        fail_msg: >-
+          Значение domain должно быть уникальным среди запускаемых нод, а число нод не должно
+          превышать количество доступных вариантов сайтов.
+      run_once: true
+
+  tasks:
+    - name: Проверка обязательных переменных инвентаря
+      ansible.builtin.assert:
+        that:
+          - domain is defined and domain | split(',') | length == 2
+          - certbot_email is defined and certbot_email | length > 0
+        fail_msg: Укажите domain в инвентаре в формате 'primary.example.com, cdn.example.com'.
+
+    - name: Разбор основного и CDN-доменов
+      ansible.builtin.set_fact:
+        domain_names: "{{ domain.split(',') | map('trim') | list }}"
+
+    - name: Настройка доменов для nginx и Certbot
+      ansible.builtin.set_fact:
+        primary_domain: "{{ domain_names[0] }}"
+        cdn_domain: "{{ domain_names[1] }}"
+
+    - name: Детерминированный выбор уникального сайта для ноды
+      ansible.builtin.set_fact:
+        selected_site_variant: "{{ available_site_variants[groups['eu_nodes'].index(inventory_hostname)] }}"
+
+    - name: Создание каталогов для развёртывания
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ stack_dir }}"
+        - "{{ stack_dir }}/conf.d"
+        - "{{ site_root }}"
+        - "{{ letsencrypt_dir }}"
+        - "{{ letsencrypt_dir }}/lib"
+
+    - name: Клонирование проверенного репозитория сайтов
+      ansible.builtin.git:
+        repo: "{{ site_repo }}"
+        dest: "{{ site_repo_dir }}"
+        version: "{{ site_repo_version }}"
+        depth: 1
+        force: false
+
+    - name: Проверка наличия выбранного сайта в репозитории
+      ansible.builtin.stat:
+        path: "{{ site_repo_dir }}/{{ selected_site_variant }}/index.html"
+      register: selected_site
+
+    - name: Остановка при отсутствии варианта сайта
+      ansible.builtin.assert:
+        that: selected_site.stat.exists
+        fail_msg: "В {{ selected_site_variant }} отсутствует index.html в {{ site_repo }} на версии {{ site_repo_version }}"
+
+    - name: Копирование выбранного уникального сайта в корневой каталог nginx
+      ansible.builtin.copy:
+        src: "{{ site_repo_dir }}/{{ selected_site_variant }}/"
+        dest: "{{ site_root }}/"
+        remote_src: true
+        mode: preserve
+      notify:
+        - Перезапуск backend сайта
+        - Перезапуск nginx
+
+    - name: Чтение конфигурации выбранного backend сайта
+      ansible.builtin.slurp:
+        src: "{{ site_root }}/package.json"
+      register: site_package
+
+    - name: Определение порта backend сайта
+      ansible.builtin.set_fact:
+        site_backend_port: "{{ ((site_package.content | b64decode | from_json).appPort | default(3000)) | int }}"
+
+    - name: Установка Node.js и инструментов для сборки зависимостей сайта
+      ansible.builtin.apt:
+        name:
+          - nodejs
+          - npm
+          - build-essential
+          - python3
+        state: present
+        update_cache: true
+
+    - name: Установка production-зависимостей backend сайта
+      ansible.builtin.command:
+        cmd: npm install --omit=dev --no-audit --no-fund
+        chdir: "{{ site_root }}"
+        creates: "{{ site_root }}/node_modules/express/package.json"
+      notify: Перезапуск backend сайта
+
+    - name: Установка systemd-службы backend сайта
+      ansible.builtin.template:
+        src: xhttp-site-backend.service.j2
+        dest: /etc/systemd/system/xhttp-site-backend.service
+        mode: '0644'
+      notify: Перезапуск backend сайта
+
+    - name: Включение и запуск backend сайта
+      ansible.builtin.systemd:
+        name: xhttp-site-backend.service
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Генерация файла Docker Compose
+      ansible.builtin.template:
+        src: docker-compose.yml.j2
+        dest: "{{ stack_dir }}/docker-compose.yml"
+        mode: '0644'
+      notify: Перезапуск nginx
+
+    - name: Генерация HTTP-конфигурации nginx
+      ansible.builtin.template:
+        src: live-http.conf.j2
+        dest: "{{ stack_dir }}/conf.d/live-http.conf"
+        mode: '0644'
+      notify: Перезапуск nginx
+
+    - name: Проверка наличия сертификата
+      ansible.builtin.stat:
+        path: "{{ letsencrypt_dir }}/live/{{ primary_domain }}/fullchain.pem"
+      register: certificate
+
+    - name: Удаление устаревшей HTTPS-конфигурации перед первичным выпуском сертификата
+      ansible.builtin.file:
+        path: "{{ stack_dir }}/conf.d/live-https.conf"
+        state: absent
+      when: not certificate.stat.exists
+
+    - name: Запуск HTTP nginx для проверки ACME
+      ansible.builtin.command:
+        cmd: docker compose up -d nginx
+        chdir: "{{ stack_dir }}"
+      changed_when: true
+      when: not certificate.stat.exists
+
+    - name: Выпуск первичного сертификата LetsEncrypt через webroot nginx
+      ansible.builtin.command:
+        cmd: >-
+          docker compose --profile certbot run --rm certbot certonly --webroot
+          --webroot-path /var/www/{{ primary_domain }}
+          --email {{ certbot_email }} --agree-tos --no-eff-email --non-interactive
+          --cert-name {{ primary_domain }} -d {{ primary_domain }}
+        chdir: "{{ stack_dir }}"
+      when: not certificate.stat.exists
+      changed_when: true
+
+    - name: Генерация HTTPS-конфигурации nginx
+      ansible.builtin.template:
+        src: live-https.conf.j2
+        dest: "{{ stack_dir }}/conf.d/live-https.conf"
+        mode: '0644'
+      notify: Перезапуск nginx
+
+    - name: Запуск nginx с HTTPS-конфигурацией
+      ansible.builtin.command:
+        cmd: docker compose up -d nginx
+        chdir: "{{ stack_dir }}"
+      changed_when: true
+
+    - name: Установка скрипта продления сертификата
+      ansible.builtin.template:
+        src: renew-certificates.sh.j2
+        dest: /usr/local/sbin/xhttp-renew-certificates
+        mode: '0750'
+
+    - name: Установка службы systemd для продления сертификата
+      ansible.builtin.template:
+        src: xhttp-certbot-renew.service.j2
+        dest: /etc/systemd/system/xhttp-certbot-renew.service
+        mode: '0644'
+
+    - name: Установка таймера systemd для продления сертификата
+      ansible.builtin.template:
+        src: xhttp-certbot-renew.timer.j2
+        dest: /etc/systemd/system/xhttp-certbot-renew.timer
+        mode: '0644'
+
+    - name: Включение таймера продления сертификата
+      ansible.builtin.systemd:
+        name: xhttp-certbot-renew.timer
+        state: started
+        enabled: true
+        daemon_reload: true
+
+  handlers:
+    - name: Перезапуск backend сайта
+      ansible.builtin.systemd:
+        name: xhttp-site-backend.service
+        state: restarted
+        enabled: true
+        daemon_reload: true
+
+    - name: Перезапуск nginx
+      ansible.builtin.command:
+        cmd: docker compose up -d --force-recreate nginx
+        chdir: "{{ stack_dir }}"
+      changed_when: true

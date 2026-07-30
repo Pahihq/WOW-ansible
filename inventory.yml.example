@@ -31,7 +31,8 @@ all:
           ansible_user: root
           monitoring_instance_name: node_pl1
           remnanode_profile: plain
-          domain: node-pl1.example.com
+          #  первое имя - это основное имя, второе - CDN.
+          domain: arch.example.com, edge.example.com
           # Добавить порт к стандартному UFW-профилю этого хоста.
           ufw_client_ports_override:
             - 1080
@@ -43,3 +44,4 @@ all:
     eu_nodes:
       hosts:
         node_pl1:
+

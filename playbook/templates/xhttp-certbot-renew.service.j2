@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew LetsEncrypt certificates for xHTTP nginx
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/xhttp-renew-certificates

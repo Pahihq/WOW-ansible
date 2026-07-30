@@ -1,0 +1,20 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: xhttp-nginx
+    restart: unless-stopped
+    # Shares host loopback with remnanode (which uses network_mode: host).
+    # Nginx therefore reaches xray at 127.0.0.1:10085.
+    network_mode: host
+    volumes:
+      - ./conf.d:/etc/nginx/conf.d:ro
+      - {{ site_root }}:/var/www/{{ primary_domain }}:ro
+      - {{ letsencrypt_dir }}:/etc/letsencrypt:ro
+
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ["certbot"]
+    volumes:
+      - {{ site_root }}:/var/www/{{ primary_domain }}
+      - {{ letsencrypt_dir }}:/etc/letsencrypt
+      - {{ letsencrypt_dir }}/lib:/var/lib/letsencrypt
