@@ -22,7 +22,7 @@
           - xhttp_cdn_env.stat.exists | default(false)
           - xhttp_cdn_env.stat.isreg | default(false)
         fail_msg: >-
-          Создайте {{ xhttp_cdn_env_file }} из config.example.env и заполните
+          Создайте {{ xhttp_cdn_env_file }} из .env.example и заполните
           параметры VK Cloud и Cloudflare. Домены в .env указывать не нужно.
       delegate_to: localhost
       become: false
@@ -45,7 +45,7 @@
           - -c
           - >-
             bash -n "$1" && command -v curl >/dev/null &&
-            command -v jq >/dev/null && command -v dig >/dev/null
+            command -v jq >/dev/null
           - _
           - "{{ xhttp_cdn_script }}"
       delegate_to: localhost

@@ -55,7 +55,7 @@ xhttp_nodes:
 | Мониторинг | `playbook/secrets/vmagent.yml` | `vmagent_remote_write_url`, `vmagent_remote_write_username`, `vmagent_remote_write_password` |
 | Отчётность | `playbook/secrets/google_sheet_id` | ID Google Sheets, одна строка |
 | Отчётность | `playbook/secrets/google_credentials.json` | JSON service account Google |
-| VK Cloud CDN | `playbook/scripts/.env` | OpenStack/VK Cloud и Cloudflare credentials, параметры ожидания и SSL |
+| VK Cloud CDN | `playbook/scripts/.env` | OpenStack/VK Cloud и Cloudflare credentials |
 
 Для отправки отчётов в Google Sheets на управляющей машине также требуются пакеты Python:
 
@@ -165,10 +165,11 @@ cp playbook/scripts/.env.example playbook/scripts/.env
 chmod 600 playbook/scripts/.env
 ```
 
-В `.env` заполните OpenStack/VK Cloud и Cloudflare credentials. `CDN_DOMAIN` и
-`ORIGIN` туда добавлять не нужно: они вычисляются из `domain: primary, cdn` в
-inventory. Чтобы временно отключить автоматическую настройку CDN, передайте
-`-e xhttp_cdn_setup_enabled=false`.
+В `.env` заполните OpenStack/VK Cloud и Cloudflare credentials. Скрипт ничего
+не запрашивает интерактивно. `CDN_DOMAIN` и `ORIGIN` вычисляются из
+`domain: primary, cdn` в inventory, протокол источника всегда `MATCH`, а CNAME
+и Let's Encrypt настраиваются автоматически. Чтобы временно отключить
+автоматическую настройку CDN, передайте `-e xhttp_cdn_setup_enabled=false`.
 
 Стек размещается в `/opt/remnanode/nginx`. Nginx использует `network_mode: host`, поэтому одновременно принимает внешние подключения на 80/443 и передаёт `/api/stream/room` в xray на `127.0.0.1:10085`. Перед запуском основной домен должен указывать на ноду для прохождения ACME-проверки, а порты 80 и 443 должны быть свободны и доступны извне. CNAME второго домена создаётся автоматически после развёртывания. E-mail Let's Encrypt задан в `group_vars/xhttp_nodes.yml`.
 

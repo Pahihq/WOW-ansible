@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROGRAM_NAME=${0##*/}
 CF_API_BASE="https://api.cloudflare.com/client/v4"
 CONFIG_PATH="${VKCS_CONFIG_PATH:-$PWD/.env}"
 
 CDN_DOMAIN=""
 ORIGIN=""
-ORIGIN_PROTOCOL="MATCH"
-DNS_TIMEOUT=900
-SSL_TIMEOUT=1800
-POLL_INTERVAL=15
 DRY_RUN=false
-SKIP_SSL=false
-SKIP_DNS_WAIT=false
-INTERACTIVE_MODE=false
 
 LAST_HTTP_CODE=""
 LAST_HTTP_BODY=""
@@ -25,26 +17,22 @@ usage() {
 Создаёт CDN-ресурс VK Cloud, CNAME в Cloudflare и сертификат Let's Encrypt.
 
 Использование:
-  setup-cdn.sh --cdn CDN_DOMAIN --origin ORIGIN [параметры]
+  setup-cdn.sh --cdn CDN_DOMAIN --origin ORIGIN [--dry-run]
 
 Обязательные параметры:
   --cdn DOMAIN              Пользовательский CDN-домен, например cdn.example.ru
   --origin HOST[:PORT]      Единственный сервер-источник
 
-Дополнительные параметры:
-  --origin-protocol VALUE   HTTP, HTTPS или MATCH (по умолчанию MATCH)
-  --dns-timeout SECONDS     Ожидание CNAME (по умолчанию 900)
-  --ssl-timeout SECONDS     Ожидание сертификата (по умолчанию 1800)
-  --poll-interval SECONDS   Интервал проверок (по умолчанию 15)
-  --skip-dns-wait           Не ждать распространения CNAME
-  --skip-ssl                Не выпускать Let's Encrypt
+Дополнительный параметр:
   --dry-run                 Выполнять только проверки и показать план изменений
   -h, --help                Показать справку
+
+Origin-протокол всегда MATCH. CNAME и Let's Encrypt настраиваются автоматически.
 
 Переменные окружения:
   VKCS_CONFIG_PATH          Путь к .env (по умолчанию .env в текущем каталоге)
   VKCS_OPENRC_FILE          Путь к OpenStack RC file v3
-  OS_PASSWORD               Пароль OpenStack (если не задан, RC-файл запросит его)
+  OS_PASSWORD               Пароль OpenStack (обязательно задаётся в .env)
   CLOUDFLARE_ACCOUNT_ID     ID аккаунта Cloudflare
   CLOUDFLARE_API_TOKEN      Account-owned API token Cloudflare
 
@@ -81,73 +69,6 @@ require_env() {
   [[ -n "${!name:-}" ]] || die "Не задана переменная окружения $name"
 }
 
-ask_yes_no() {
-  local question=$1
-  local default=${2:-yes}
-  local suffix answer
-
-  if [[ "$default" == "yes" ]]; then
-    suffix="[Y/n]"
-  else
-    suffix="[y/N]"
-  fi
-
-  while true; do
-    read -r -p "$question $suffix " answer
-    answer=${answer,,}
-    if [[ -z "$answer" ]]; then
-      [[ "$default" == "yes" ]]
-      return
-    fi
-    case "$answer" in
-      y|yes|д|да)
-        return 0
-        ;;
-      n|no|н|нет)
-        return 1
-        ;;
-      *)
-        printf 'Введите y/yes/да или n/no/нет.\n' >&2
-        ;;
-    esac
-  done
-}
-
-prompt_value() {
-  local variable_name=$1
-  local label=$2
-  local secret=${3:-false}
-  local current=${!variable_name:-}
-  local value=""
-
-  while true; do
-    if $secret; then
-      if [[ -n "$current" ]]; then
-        read -r -s -p "$label [уже настроено, Enter — оставить]: " value
-      else
-        read -r -s -p "$label: " value
-      fi
-      printf '\n' >&2
-    else
-      if [[ -n "$current" ]]; then
-        read -r -p "$label [$current]: " value
-      else
-        read -r -p "$label: " value
-      fi
-    fi
-
-    if [[ -z "$value" ]]; then
-      value=$current
-    fi
-    if [[ -n "$value" ]]; then
-      printf -v "$variable_name" '%s' "$value"
-      export "$variable_name"
-      return
-    fi
-    printf 'Значение не может быть пустым.\n' >&2
-  done
-}
-
 load_saved_config() {
   if [[ -f "$CONFIG_PATH" ]]; then
     set -a
@@ -156,240 +77,6 @@ load_saved_config() {
     set +a
     log "Настройки загружены из $CONFIG_PATH"
   fi
-}
-
-save_env_value() {
-  local name=$1
-  local value=${!name:-}
-  printf '%s=%q\n' "$name" "$value"
-}
-
-save_interactive_config() {
-  local temp_path="$CONFIG_PATH.tmp"
-
-  umask 077
-  {
-    printf '# Создано %s. Содержит секреты; не добавляйте файл в Git.\n' "$PROGRAM_NAME"
-    save_env_value VKCS_OPENRC_FILE
-    save_env_value OS_AUTH_URL
-    save_env_value OS_PROJECT_ID
-    save_env_value OS_PROJECT_NAME
-    save_env_value OS_PROJECT_DOMAIN_ID
-    save_env_value OS_REGION_NAME
-    save_env_value OS_USERNAME
-    save_env_value OS_USER_DOMAIN_ID
-    save_env_value OS_USER_DOMAIN_NAME
-    save_env_value OS_INTERFACE
-    save_env_value OS_IDENTITY_API_VERSION
-    save_env_value OS_PASSWORD
-    save_env_value CLOUDFLARE_ACCOUNT_ID
-    save_env_value CLOUDFLARE_API_TOKEN
-    save_env_value CDN_DOMAIN
-    save_env_value ORIGIN
-    save_env_value ORIGIN_PROTOCOL
-    save_env_value DNS_TIMEOUT
-    save_env_value SSL_TIMEOUT
-    save_env_value POLL_INTERVAL
-    save_env_value SKIP_DNS_WAIT
-    save_env_value SKIP_SSL
-  } >"$temp_path"
-  chmod 600 "$temp_path"
-  mv -f -- "$temp_path" "$CONFIG_PATH"
-  log "Настройки сохранены в $CONFIG_PATH (права 600)"
-}
-
-discover_openrc_file() {
-  local downloads_dir="${HOME:-}/Downloads"
-  local candidate
-  local -a matches=()
-
-  while IFS= read -r candidate; do
-    matches+=("$candidate")
-  done < <(
-    find "$PWD" "$downloads_dir" \
-      -maxdepth 1 -type f -iname '*openrc*.sh' -print 2>/dev/null
-  )
-
-  if ((${#matches[@]} >= 1)); then
-    printf '%s' "${matches[0]}"
-  fi
-}
-
-load_interactive_config() {
-  local auth_choice discovered_openrc
-
-  if [[ -z "${OS_AUTH_URL:-}" ||
-    -z "${OS_PROJECT_ID:-}" ||
-    -z "${OS_USERNAME:-}" ||
-    -z "${OS_PASSWORD:-}" ]]; then
-    printf '\nНастройка доступа к VK Cloud:\n'
-    printf '1) Загрузить OpenStack RC file v3\n'
-    printf '2) Ввести параметры OpenStack вручную\n'
-    read -r -p 'Выберите способ [1]: ' auth_choice
-    auth_choice=${auth_choice:-1}
-
-    case "$auth_choice" in
-      1)
-        discovered_openrc=$(discover_openrc_file)
-        if [[ -z "${VKCS_OPENRC_FILE:-}" && -n "$discovered_openrc" ]]; then
-          VKCS_OPENRC_FILE=$discovered_openrc
-          log "Найден OpenStack RC file: $VKCS_OPENRC_FILE"
-        fi
-        prompt_value VKCS_OPENRC_FILE "Путь к OpenStack RC file v3"
-        ;;
-      2)
-        OS_AUTH_URL=${OS_AUTH_URL:-https://msk.cloud.vk.com/infra/identity/v3/}
-        OS_PROJECT_ID=${OS_PROJECT_ID:-${VKCS_PROJECT_ID:-}}
-        OS_REGION_NAME=${OS_REGION_NAME:-RegionOne}
-        OS_USER_DOMAIN_NAME=${OS_USER_DOMAIN_NAME:-users}
-        OS_INTERFACE=${OS_INTERFACE:-public}
-        OS_IDENTITY_API_VERSION=${OS_IDENTITY_API_VERSION:-3}
-
-        prompt_value OS_AUTH_URL "OpenStack Auth URL"
-        prompt_value OS_PROJECT_ID "OpenStack Project ID"
-        prompt_value OS_PROJECT_NAME "OpenStack Project Name"
-        prompt_value OS_PROJECT_DOMAIN_ID "OpenStack Project Domain ID"
-        prompt_value OS_USERNAME "OpenStack Username"
-        prompt_value OS_USER_DOMAIN_NAME "OpenStack User Domain Name"
-        prompt_value OS_REGION_NAME "OpenStack Region Name"
-        prompt_value OS_INTERFACE "OpenStack Interface"
-        prompt_value OS_IDENTITY_API_VERSION "Identity API Version"
-        prompt_value OS_PASSWORD "OpenStack Password" true
-        ;;
-      *)
-        die "Неизвестный способ настройки OpenStack: $auth_choice"
-        ;;
-    esac
-  fi
-  if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
-    prompt_value CLOUDFLARE_ACCOUNT_ID "Cloudflare account_id"
-  fi
-  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-    prompt_value CLOUDFLARE_API_TOKEN "Cloudflare account API token" true
-  fi
-}
-
-interactive_menu() {
-  local choice protocol_choice protocol_default dns_wait_default ssl_default
-
-  INTERACTIVE_MODE=true
-
-  printf '\n'
-  printf 'VK Cloud CDN + Cloudflare DNS\n'
-  printf '%s\n' '--------------------------------'
-
-  while true; do
-    printf '\n'
-    printf '1) Создать или проверить CDN\n'
-    printf '2) Проверка без изменений (dry-run)\n'
-    printf '3) Показать справку\n'
-    printf '0) Выход\n'
-    read -r -p 'Выберите действие [1]: ' choice
-    choice=${choice:-1}
-
-    case "$choice" in
-      1)
-        DRY_RUN=false
-        break
-        ;;
-      2)
-        DRY_RUN=true
-        break
-        ;;
-      3)
-        printf '\n'
-        usage
-        ;;
-      0)
-        log "Операция отменена"
-        exit 0
-        ;;
-      *)
-        printf 'Неизвестный пункт меню.\n' >&2
-        ;;
-    esac
-  done
-
-  load_interactive_config
-  prompt_value CDN_DOMAIN "CDN-домен"
-  prompt_value ORIGIN "Домен или IP источника[:порт]"
-
-  case "${ORIGIN_PROTOCOL^^}" in
-    HTTPS) protocol_default=2 ;;
-    HTTP) protocol_default=3 ;;
-    *) protocol_default=1 ;;
-  esac
-
-  while true; do
-    printf '\n'
-    printf 'Протокол обращения CDN к источнику:\n'
-    printf '1) MATCH — повторять протокол запроса пользователя\n'
-    printf '2) HTTPS\n'
-    printf '3) HTTP\n'
-    read -r -p "Выберите протокол [$protocol_default]: " protocol_choice
-    protocol_choice=${protocol_choice:-$protocol_default}
-    case "$protocol_choice" in
-      1)
-        ORIGIN_PROTOCOL="MATCH"
-        break
-        ;;
-      2)
-        ORIGIN_PROTOCOL="HTTPS"
-        break
-        ;;
-      3)
-        ORIGIN_PROTOCOL="HTTP"
-        break
-        ;;
-      *)
-        printf 'Выберите 1, 2 или 3.\n' >&2
-        ;;
-    esac
-  done
-
-  dns_wait_default=yes
-  $SKIP_DNS_WAIT && dns_wait_default=no
-  if ask_yes_no "Ждать появления CNAME в публичном DNS?" "$dns_wait_default"; then
-    SKIP_DNS_WAIT=false
-  else
-    SKIP_DNS_WAIT=true
-  fi
-
-  ssl_default=yes
-  $SKIP_SSL && ssl_default=no
-  if ask_yes_no "Выпустить сертификат Let's Encrypt?" "$ssl_default"; then
-    SKIP_SSL=false
-  else
-    SKIP_SSL=true
-  fi
-
-  if ask_yes_no "Настроить интервалы ожидания вручную?" no; then
-    prompt_value DNS_TIMEOUT "Время ожидания DNS, секунд"
-    prompt_value SSL_TIMEOUT "Время ожидания SSL, секунд"
-    prompt_value POLL_INTERVAL "Интервал проверок, секунд"
-  fi
-
-  CDN_DOMAIN=$(normalize_domain "$CDN_DOMAIN")
-  ORIGIN=$(normalize_domain "$ORIGIN")
-
-  printf '\n'
-  printf 'Итоговая конфигурация\n'
-  printf '%s\n' '--------------------------------'
-  printf 'Режим:             %s\n' "$($DRY_RUN && printf 'dry-run' || printf 'создание')"
-  printf 'CDN-домен:         %s\n' "$CDN_DOMAIN"
-  printf 'Источник:          %s\n' "$ORIGIN"
-  printf 'Протокол origin:   %s\n' "$ORIGIN_PROTOCOL"
-  printf 'Ожидание DNS:      %s\n' "$($SKIP_DNS_WAIT && printf 'нет' || printf 'да')"
-  printf "Let's Encrypt:     %s\n" "$($SKIP_SSL && printf 'нет' || printf 'да')"
-  printf 'Cloudflare Proxy:  выключен\n'
-  printf 'HTTP-методы:       GET, HEAD\n'
-  printf '%s\n' '--------------------------------'
-
-  if ! ask_yes_no "Продолжить?" yes; then
-    log "Операция отменена"
-    exit 0
-  fi
-
 }
 
 normalize_domain() {
@@ -412,12 +99,15 @@ load_openrc() {
   fi
 
   require_env VKCS_OPENRC_FILE
+  require_env OS_PASSWORD
   [[ -f "$VKCS_OPENRC_FILE" ]] || die "OpenStack RC file не найден: $VKCS_OPENRC_FILE"
 
   log "Загружаю OpenStack RC file: $VKCS_OPENRC_FILE"
   set +u
   # shellcheck disable=SC1090
-  source "$VKCS_OPENRC_FILE"
+  # Horizon RC-файлы могут безусловно запрашивать пароль через read. Передаём
+  # сохранённый OS_PASSWORD на stdin, чтобы запуск оставался неинтерактивным.
+  source "$VKCS_OPENRC_FILE" <<<"$OS_PASSWORD" >/dev/null
   set -u
 
   require_env OS_AUTH_URL
@@ -429,23 +119,14 @@ load_openrc() {
 }
 
 validate_inputs() {
-  [[ -n "$CDN_DOMAIN" ]] || die "Укажите --cdn"
-  [[ -n "$ORIGIN" ]] || die "Укажите --origin"
-
   CDN_DOMAIN=$(normalize_domain "$CDN_DOMAIN")
   ORIGIN=$(normalize_domain "$ORIGIN")
-  ORIGIN_PROTOCOL=${ORIGIN_PROTOCOL^^}
 
   [[ "$CDN_DOMAIN" != *"*"* ]] || die "Wildcard-домены несовместимы с Let's Encrypt в VK Cloud"
   [[ "$CDN_DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] ||
     die "CDN-домен должен быть передан в ASCII/Punycode без пути"
   [[ "$CDN_DOMAIN" == *.* ]] || die "CDN-домен должен быть полным доменным именем"
   [[ "$ORIGIN" != *"@"* ]] || die "Origin не должен содержать логин или пароль"
-  [[ "$ORIGIN_PROTOCOL" =~ ^(HTTP|HTTPS|MATCH)$ ]] ||
-    die "--origin-protocol должен быть HTTP, HTTPS или MATCH"
-  [[ "$DNS_TIMEOUT" =~ ^[0-9]+$ ]] || die "--dns-timeout должен быть целым числом"
-  [[ "$SSL_TIMEOUT" =~ ^[0-9]+$ ]] || die "--ssl-timeout должен быть целым числом"
-  [[ "$POLL_INTERVAL" =~ ^[1-9][0-9]*$ ]] || die "--poll-interval должен быть больше нуля"
 
   require_env OS_AUTH_URL
   require_env OS_PROJECT_ID
@@ -788,8 +469,9 @@ verify_existing_vk_resource() {
   active=$(jq -r '.active // false' <<<"$resource")
   enabled=$(jq -r '.enabled // false' <<<"$resource")
   methods_ok=$(jq -r '
-    (.options.allowedHttpMethods.enabled // false) == true
-    and ((.options.allowedHttpMethods.value // []) | sort == ["GET", "HEAD"])
+    (.options.allowedHttpMethods // .options.allowed_http_methods // {}) as $methods
+    | ($methods.enabled // false) == true
+      and (($methods.value // []) | sort == ["GET", "HEAD"])
   ' <<<"$resource")
   host_forward_ok=$(jq -r '
     (.options.forward_host_header.enabled // false) == true
@@ -799,15 +481,19 @@ verify_existing_vk_resource() {
     [
       (.options // {})
       | to_entries[]
-      | select(.key != "allowedHttpMethods" and .key != "forward_host_header")
+      | select(
+          .key != "allowedHttpMethods"
+          and .key != "allowed_http_methods"
+          and .key != "forward_host_header"
+        )
       | select((.value | type) == "object" and (.value.enabled // false) == true)
       | .key
     ]
     | join(",")
   ' <<<"$resource")
 
-  [[ "$protocol" == "$ORIGIN_PROTOCOL" ]] ||
-    die "Ресурс $resource_id использует originProtocol=$protocol, ожидался $ORIGIN_PROTOCOL"
+  [[ "$protocol" == "MATCH" ]] ||
+    die "Ресурс $resource_id использует originProtocol=$protocol, ожидался MATCH"
   [[ "$active" == "true" && "$enabled" == "true" ]] ||
     die "У существующего ресурса $resource_id отключён доступ к контенту"
   [[ "$methods_ok" == "true" ]] ||
@@ -839,12 +525,11 @@ create_vk_resource() {
   payload=$(jq -cn \
     --arg cname "$CDN_DOMAIN" \
     --argjson origin_group "$origin_group_id" \
-    --arg protocol "$ORIGIN_PROTOCOL" \
     '{
       cname: $cname,
       secondaryHostnames: [],
       originGroup: $origin_group,
-      originProtocol: $protocol,
+      originProtocol: "MATCH",
       active: true,
       enabled: true,
       sslEnabled: false,
@@ -884,10 +569,8 @@ get_vk_resource() {
   printf '%s' "$LAST_HTTP_BODY"
 }
 
-wait_for_vk_resource() {
+wait_for_lets_encrypt() {
   local resource_id=$1
-  local timeout=$2
-  local purpose=$3
   local started=$SECONDS
 
   while true; do
@@ -896,28 +579,20 @@ wait_for_vk_resource() {
     local status
     status=$(jq -r '.status // empty' <<<"$resource")
 
-    if [[ "$purpose" == "active" && "$status" == "active" ]]; then
-      printf '%s' "$resource"
+    local ssl_enabled ssl_automated
+    ssl_enabled=$(jq -r '.sslEnabled // false' <<<"$resource")
+    ssl_automated=$(jq -r '.ssl_automated // false' <<<"$resource")
+    if [[ "$ssl_enabled" == "true" && "$ssl_automated" == "true" ]]; then
       return
-    fi
-
-    if [[ "$purpose" == "ssl" ]]; then
-      local ssl_enabled ssl_automated
-      ssl_enabled=$(jq -r '.sslEnabled // false' <<<"$resource")
-      ssl_automated=$(jq -r '.ssl_automated // false' <<<"$resource")
-      if [[ "$ssl_enabled" == "true" && "$ssl_automated" == "true" ]]; then
-        printf '%s' "$resource"
-        return
-      fi
     fi
 
     [[ "$status" != "suspended" ]] ||
       die "CDN-ресурс $resource_id перешёл в состояние suspended"
-    ((SECONDS - started < timeout)) ||
-      die "Истекло время ожидания CDN-ресурса $resource_id ($purpose)"
+    ((SECONDS - started < 1800)) ||
+      die "Истекло время ожидания Let's Encrypt для CDN-ресурса $resource_id"
 
-    log "CDN-ресурс $resource_id: status=${status:-unknown}, ожидаю $purpose"
-    sleep "$POLL_INTERVAL"
+    log "CDN-ресурс $resource_id: status=${status:-unknown}, ожидаю SSL"
+    sleep 15
   done
 }
 
@@ -993,43 +668,9 @@ upsert_cloudflare_cname() {
   expect_cloudflare_success "Обновление CNAME $CDN_DOMAIN"
 }
 
-wait_for_dns() {
-  local expected=$1
-  local started=$SECONDS
-
-  if $SKIP_DNS_WAIT; then
-    warn "Ожидание DNS пропущено"
-    return
-  fi
-
-  require_command dig
-  log "Ожидаю публичный CNAME $CDN_DOMAIN → $expected"
-  while true; do
-    local answer
-    answer=$(dig +short CNAME "$CDN_DOMAIN" @1.1.1.1 2>/dev/null | head -n1 || true)
-    answer=$(normalize_domain "$answer")
-
-    if [[ "$answer" == "$expected" ]]; then
-      log "DNS-запись опубликована"
-      return
-    fi
-
-    ((SECONDS - started < DNS_TIMEOUT)) ||
-      die "CNAME не появился за $DNS_TIMEOUT секунд; последний ответ: ${answer:-пусто}"
-
-    log "DNS пока не обновился; последний ответ: ${answer:-пусто}"
-    sleep "$POLL_INTERVAL"
-  done
-}
-
 ensure_lets_encrypt() {
   local resource_id=$1
   local resource=$2
-
-  if $SKIP_SSL; then
-    warn "Выпуск Let's Encrypt пропущен"
-    return
-  fi
 
   local ssl_enabled ssl_automated
   ssl_enabled=$(jq -r '.sslEnabled // false' <<<"$resource")
@@ -1067,17 +708,11 @@ ensure_lets_encrypt() {
     fi
   fi
 
-  log "Ожидаю активацию Let's Encrypt (до $SSL_TIMEOUT секунд)"
-  wait_for_vk_resource "$resource_id" "$SSL_TIMEOUT" ssl >/dev/null
-  log "Let's Encrypt активирован и настроен на автопродление"
+  log "Запрос на выпуск Let's Encrypt отправлен; активация продолжится асинхронно в VK Cloud"
 }
 
 main() {
   load_saved_config
-
-  if (($# == 0)); then
-    interactive_menu
-  fi
 
   while (($# > 0)); do
     case "$1" in
@@ -1090,34 +725,6 @@ main() {
         (($# >= 2)) || die "После --origin требуется значение"
         ORIGIN=$2
         shift 2
-        ;;
-      --origin-protocol)
-        (($# >= 2)) || die "После --origin-protocol требуется значение"
-        ORIGIN_PROTOCOL=$2
-        shift 2
-        ;;
-      --dns-timeout)
-        (($# >= 2)) || die "После --dns-timeout требуется значение"
-        DNS_TIMEOUT=$2
-        shift 2
-        ;;
-      --ssl-timeout)
-        (($# >= 2)) || die "После --ssl-timeout требуется значение"
-        SSL_TIMEOUT=$2
-        shift 2
-        ;;
-      --poll-interval)
-        (($# >= 2)) || die "После --poll-interval требуется значение"
-        POLL_INTERVAL=$2
-        shift 2
-        ;;
-      --skip-dns-wait)
-        SKIP_DNS_WAIT=true
-        shift
-        ;;
-      --skip-ssl)
-        SKIP_SSL=true
-        shift
         ;;
       --dry-run)
         DRY_RUN=true
@@ -1133,14 +740,13 @@ main() {
     esac
   done
 
+  [[ -n "$CDN_DOMAIN" ]] || die "Укажите --cdn"
+  [[ -n "$ORIGIN" ]] || die "Укажите --origin"
+
   require_command curl
   require_command jq
   load_openrc
   validate_inputs
-
-  if $INTERACTIVE_MODE; then
-    save_interactive_config
-  fi
 
   TMP_DIR=$(mktemp -d)
   trap cleanup EXIT
@@ -1179,24 +785,14 @@ main() {
     fi
   fi
 
-  # Публикуем CNAME сразу: технический адрес доступен ещё во время обработки
-  # CDN-ресурса, поэтому нет необходимости ждать status=active.
+  # Публикуем CNAME и сразу запускаем Let's Encrypt, не ожидая публичного DNS
+  # или перехода CDN-ресурса из processed в active.
   upsert_cloudflare_cname "$zone_id" "$vk_target"
-
-  if ! $DRY_RUN; then
-    wait_for_dns "$vk_target"
-  fi
-
-  if [[ -n "$resource_id" ]]; then
-    log "Ожидаю готовность CDN-ресурса"
-    resource=$(wait_for_vk_resource "$resource_id" "$DNS_TIMEOUT" active)
-    log "CDN-ресурс готов"
-  fi
 
   if [[ -n "$resource_id" ]]; then
     ensure_lets_encrypt "$resource_id" "$resource"
-  elif ! $SKIP_SSL; then
-    log "DRY-RUN: Let's Encrypt будет запрошен после создания ресурса и публикации DNS"
+  else
+    log "DRY-RUN: Let's Encrypt будет запрошен сразу после создания CNAME"
   fi
 
   log "Готово: $CDN_DOMAIN → VK CDN → $ORIGIN"
