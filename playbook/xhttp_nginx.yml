@@ -7,6 +7,53 @@
     - ../group_vars/xhttp_nodes.yml
 
   pre_tasks:
+    - name: Проверка локального файла настроек VK Cloud CDN
+      ansible.builtin.stat:
+        path: "{{ xhttp_cdn_env_file }}"
+      register: xhttp_cdn_env
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: xhttp_cdn_setup_enabled | bool
+
+    - name: Остановка при отсутствии локального .env для VK Cloud CDN
+      ansible.builtin.assert:
+        that:
+          - xhttp_cdn_env.stat.exists | default(false)
+          - xhttp_cdn_env.stat.isreg | default(false)
+        fail_msg: >-
+          Создайте {{ xhttp_cdn_env_file }} из config.example.env и заполните
+          параметры VK Cloud и Cloudflare. Домены в .env указывать не нужно.
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: xhttp_cdn_setup_enabled | bool
+
+    - name: Ограничение прав локального .env с секретами CDN
+      ansible.builtin.file:
+        path: "{{ xhttp_cdn_env_file }}"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: xhttp_cdn_setup_enabled | bool
+
+    - name: Проверка локального CDN-скрипта и необходимых утилит
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -c
+          - >-
+            bash -n "$1" && command -v curl >/dev/null &&
+            command -v jq >/dev/null && command -v dig >/dev/null
+          - _
+          - "{{ xhttp_cdn_script }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      when: xhttp_cdn_setup_enabled | bool
+
     - name: Проверка семейства ОС Debian
       ansible.builtin.assert:
         that: ansible_facts.os_family == 'Debian'
@@ -203,6 +250,32 @@
         state: started
         enabled: true
         daemon_reload: true
+
+    - name: Применение отложенных перезапусков перед настройкой CDN
+      ansible.builtin.meta: flush_handlers
+
+    - name: Создание VK Cloud CDN и CNAME Cloudflare для доменов ноды
+      ansible.builtin.command:
+        argv:
+          - "{{ xhttp_cdn_script }}"
+          - --cdn
+          - "{{ cdn_domain }}"
+          - --origin
+          - "{{ primary_domain }}"
+        chdir: "{{ xhttp_cdn_script | dirname }}"
+      environment:
+        VKCS_CONFIG_PATH: "{{ xhttp_cdn_env_file }}"
+      register: xhttp_cdn_setup
+      delegate_to: localhost
+      become: false
+      throttle: 1
+      changed_when: >-
+        'Создаю origin group' in (xhttp_cdn_setup.stderr | default('')) or
+        'CDN-ресурс создан' in (xhttp_cdn_setup.stderr | default('')) or
+        'Создаю CNAME' in (xhttp_cdn_setup.stderr | default('')) or
+        'Обновляю CNAME' in (xhttp_cdn_setup.stderr | default('')) or
+        'Запускаю выпуск' in (xhttp_cdn_setup.stderr | default(''))
+      when: xhttp_cdn_setup_enabled | bool
 
   handlers:
     - name: Перезапуск backend сайта

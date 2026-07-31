@@ -9,10 +9,11 @@ group_vars/docker_nodes.yml
 
 # Secrets
 playbook/secrets/
+playbook/scripts/.env
 *.vault
 *.vault.yml
 *.vault.yaml
-
+*openrc.sh
 # Ansible runtime artifacts
 *.retry
 .ansible/

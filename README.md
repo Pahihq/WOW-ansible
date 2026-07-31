@@ -55,6 +55,7 @@ xhttp_nodes:
 | Мониторинг | `playbook/secrets/vmagent.yml` | `vmagent_remote_write_url`, `vmagent_remote_write_username`, `vmagent_remote_write_password` |
 | Отчётность | `playbook/secrets/google_sheet_id` | ID Google Sheets, одна строка |
 | Отчётность | `playbook/secrets/google_credentials.json` | JSON service account Google |
+| VK Cloud CDN | `playbook/scripts/.env` | OpenStack/VK Cloud и Cloudflare credentials, параметры ожидания и SSL |
 
 Для отправки отчётов в Google Sheets на управляющей машине также требуются пакеты Python:
 
@@ -151,7 +152,25 @@ ansible-playbook playbook/xhttp_nginx.yml --limit xhttp_nodes
 
 Этот playbook не устанавливает Docker, Docker Compose или Git: они должны быть на ноде заранее. Он выбирает разные статические витрины из `Pahihq/xhttp-selfsteal` автоматически по порядку нод в группе, получает сертификат Let's Encrypt через webroot и настраивает продление дважды в сутки.
 
-Стек размещается в `/opt/remnanode/nginx`. Nginx использует `network_mode: host`, поэтому одновременно принимает внешние подключения на 80/443 и передаёт `/api/stream/room` в xray на `127.0.0.1:10085`. Перед запуском DNS обоих доменов должен указывать на ноду, а порты 80 и 443 должны быть свободны и доступны извне. E-mail Let's Encrypt задан в `group_vars/xhttp_nodes.yml`.
+После успешного развёртывания ноды playbook локально запускает
+`playbook/scripts/setup-cdn.sh`. Первый домен из inventory передаётся как origin,
+второй — как CDN-домен. Остальные параметры читаются только из локального
+`playbook/scripts/.env`; секреты на управляемую ноду не копируются. Вызовы для
+нескольких нод выполняются последовательно.
+
+Подготовьте `.env` перед запуском:
+
+```bash
+cp playbook/scripts/.env.example playbook/scripts/.env
+chmod 600 playbook/scripts/.env
+```
+
+В `.env` заполните OpenStack/VK Cloud и Cloudflare credentials. `CDN_DOMAIN` и
+`ORIGIN` туда добавлять не нужно: они вычисляются из `domain: primary, cdn` в
+inventory. Чтобы временно отключить автоматическую настройку CDN, передайте
+`-e xhttp_cdn_setup_enabled=false`.
+
+Стек размещается в `/opt/remnanode/nginx`. Nginx использует `network_mode: host`, поэтому одновременно принимает внешние подключения на 80/443 и передаёт `/api/stream/room` в xray на `127.0.0.1:10085`. Перед запуском основной домен должен указывать на ноду для прохождения ACME-проверки, а порты 80 и 443 должны быть свободны и доступны извне. CNAME второго домена создаётся автоматически после развёртывания. E-mail Let's Encrypt задан в `group_vars/xhttp_nodes.yml`.
 
 ## Проверки и безопасный запуск
 
