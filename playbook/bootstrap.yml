@@ -99,12 +99,7 @@
         owner: root
         group: root
         mode: "0644"
-      register: en_us_locale_config
-
-    - name: Дебиан/Убунту | Создать локаль en_US.UTF-8
-      ansible.builtin.command: locale-gen en_US.UTF-8
-      changed_when: true
-      when: en_us_locale_config.changed
+      notify: Сгенерировать локаль en_US.UTF-8
 
     - name: Дебиан/Убунту | Проверить текущую локаль по умолчанию
       ansible.builtin.command: awk -F= '$1 == "LANG" { gsub(/"/, "", $2); print $2 }' /etc/default/locale
@@ -116,6 +111,11 @@
       ansible.builtin.command: update-locale LANG=en_US.UTF-8
       changed_when: true
       when: default_locale_check.stdout != 'en_US.UTF-8'
+
+  handlers:
+    - name: Сгенерировать локаль en_US.UTF-8
+      ansible.builtin.command: locale-gen en_US.UTF-8
+      changed_when: true
 
 - name: Установите Docker Engine для хостов RemnaNode.
   hosts: all
@@ -345,12 +345,8 @@
       when: official_speedtest_package_check.rc != 0
 
     - name: Очистите кеш apt после удаления конфликтующего репозитория Ookla.
-      ansible.builtin.command: apt-get clean
-      register: apt_clean_result
-      retries: 20
-      delay: 15
-      until: apt_clean_result.rc == 0
-      changed_when: false
+      ansible.builtin.apt:
+        clean: true
 
     - name: Проверьте доступные репозитории Ookla
       ansible.builtin.uri:
@@ -1077,7 +1073,7 @@
         mode: '0700'
 
     - name: Добавьте открытый ключ SSH в корневой авторизованный ключ.
-      ansible.builtin.authorized_key:
+      ansible.posix.authorized_key:
         user: root
         state: present
         key: "{{ root_authorized_key }}"
