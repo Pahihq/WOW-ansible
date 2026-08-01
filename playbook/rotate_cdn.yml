@@ -12,6 +12,11 @@
     cdn_dry_run: false
     cdn_resume: false
     cdn_legacy_inbound_tag: CDNVK
+    # Признак запуска сторожом 451 (playbook/scripts/cdn_watchdog.py).
+    auto_trigger: false
+    # Гасить ли прошлое плечо ноды по завершении: при авторотации — да,
+    # при ручном запуске старое плечо остаётся включённым, снимаешь сам.
+    cdn_retire_previous: "{{ auto_trigger | bool }}"
   roles:
     - role: remnawave
   tasks:
@@ -240,8 +245,8 @@
         remnawave_retire_uuid: "{{ cdn_prev.host_uuid }}"
       when:
         - not (cdn_dry_run | bool)
-        - cdn_retire_previous | bool
         - (cdn_prev | default({}, true)).host_uuid | default('') | length > 0
+        - cdn_retire_previous | default(false) | bool
 
     - name: Пометка ротации как завершённой
       ansible.builtin.include_role:

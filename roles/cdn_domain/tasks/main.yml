@@ -118,6 +118,8 @@
     - { zone: "{{ cdn_front_zone }}", name: "{{ cdn_front_domain_new }}" }
   loop_control:
     label: "{{ item.name }}"
+    # Два запроса подряд в один и тот же edge CF иногда ловят обрыв на переподключении.
+    pause: 1
   delegate_to: localhost
   become: false
   changed_when: false
@@ -125,13 +127,22 @@
   no_log: true
 
 # Диагностика без раскрытия токена: no_log прячет и причину падения тоже,
-# поэтому статусы вынимаем отдельной задачей.
+# поэтому статус И ТЕКСТ ОШИБКИ вынимаем отдельной задачей.
+#
+# status: -1 — это НЕ ответ Cloudflare. Так модуль uri помечает случай, когда
+# HTTP-ответа не было вовсе: запрос умер на транспорте (DNS, TCP, TLS-рукопожатие,
+# таймаут, обрыв). Настоящая причина лежит в msg — без неё видно только голое число.
 - name: Статусы проверки занятости имён
   ansible.builtin.assert:
     that: cf_existing.results | map(attribute='status') | unique == [200]
     fail_msg: >-
-      Cloudflare ответил {{ cf_existing.results | map(attribute='status') | list }}
-      на проверку занятости имён (429 = лимит запросов, 403 = прав не хватает)
+      Проверка занятости имён не прошла.
+      Статусы: {{ cf_existing.results | map(attribute='status') | list }}.
+      Причина: {{ cf_existing.results | rejectattr('status', 'equalto', 200)
+                  | map(attribute='msg', default='текста нет') | list }}.
+      · -1 = HTTP-ответа не было вообще (сеть/DNS/TLS), Cloudflare тут ни при чём;
+      записей ещё не создано — просто перезапусти ротацию
+      · 429 = лимит запросов · 403 = токену не хватает прав на зону
 
 - name: Остановка при коллизии имён
   ansible.builtin.assert:

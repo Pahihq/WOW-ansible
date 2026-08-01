@@ -8,7 +8,7 @@ cdn_domain_zones:
 
 # Слова для генерации имён. Origin и фронт берут РАЗНЫЕ слова и могут быть в разных зонах —
 # связать их по имени со стороны не выйдет.
-cdn_domain_origin_words: [beas, lemas, kora, vespa, tandо, mirel, kasta, norva, seldo, arvi, plesk, tomea]
+cdn_domain_origin_words: [beas, lemas, kora, vespa, tando, mirel, kasta, norva, seldo, arvi, plesk, tomea]
 cdn_domain_front_words:  [stream, edge, media, live, cdn, node, relay, delta, flux, wave, pulse, cast]
 cdn_domain_front_suffix: [leam, beas, vira, nord, kite, alto, remo, luna, sten, orbi]
 
