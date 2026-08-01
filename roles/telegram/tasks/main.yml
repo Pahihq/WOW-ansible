@@ -12,7 +12,19 @@
   ansible.builtin.set_fact:
     tg_token: "{{ (tg_env.content | b64decode | regex_search('TELEGRAM_BOT_TOKEN=\"?([^\"\\n]+)', '\\1') | first) }}"
     tg_chat: "{{ (tg_env.content | b64decode | regex_search('TELEGRAM_CHAT_ID=\"?([^\"\\n]+)', '\\1') | first) }}"
+    # ВАЖНО: без этой строки сообщение уходит в General, а не в топик (проверено 2026-08-01).
+    # default([''], true) — чтобы отсутствие TELEGRAM_THREAD_ID в env не роняло разбор.
+    tg_thread: "{{ (tg_env.content | b64decode | regex_search('TELEGRAM_THREAD_ID=\"?([^\"\\n]+)', '\\1') | default([''], true) | first) }}"
   no_log: true
+
+- name: 'ПРОВЕРКА: credentials разобраны'
+  ansible.builtin.assert:
+    that:
+      - tg_token | length > 20
+      - tg_chat | length > 0
+    fail_msg: >-
+      Не разобран {{ telegram_env_file }}: нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID
+      (TELEGRAM_THREAD_ID опционален — без него отчёт уйдёт в General)
 
 - name: Отправка сообщения
   ansible.builtin.uri:
@@ -21,7 +33,7 @@
     body_format: json
     body:
       chat_id: "{{ tg_chat }}"
-      message_thread_id: "{{ tg_thread | default('', true) | int if (tg_thread | default('', true)) | length > 0 else omit }}"
+      message_thread_id: "{{ (tg_thread | int) if (tg_thread | default('', true) | length > 0) else omit }}"
       text: "{{ telegram_message }}"
       parse_mode: "{{ telegram_parse_mode }}"
       disable_web_page_preview: true
@@ -37,5 +49,6 @@
 - name: Результат отправки
   ansible.builtin.debug:
     msg: >-
-      Telegram: {{ 'отчёт отправлен' if (tg_res.status | default(0)) == 200
-      else 'НЕ отправлен (код ' ~ (tg_res.status | default('?')) ~ ') — ротацию это не отменяет' }}
+      Telegram: {{ 'отчёт отправлен в топик ' ~ tg_thread if ((tg_res.status | default(0)) == 200 and (tg_thread | length > 0))
+      else ('отчёт отправлен в General (топик не задан)' if (tg_res.status | default(0)) == 200
+      else 'НЕ отправлен (код ' ~ (tg_res.status | default('?')) ~ ') — ротацию это не отменяет') }}

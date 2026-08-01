@@ -29,8 +29,8 @@
     return_content: true
   register: cf_zones
   until: cf_zones.status == 200
-  retries: 5
-  delay: 8
+  retries: 10
+  delay: 6
   delegate_to: localhost
   become: false
   changed_when: false
@@ -58,8 +58,8 @@
     return_content: true
   register: cf_all_records
   until: cf_all_records.status == 200
-  retries: 5
-  delay: 8
+  retries: 10
+  delay: 6
   loop: "{{ cf_usable_zones }}"
   loop_control:
     label: "{{ item.name }}"
@@ -111,8 +111,8 @@
     return_content: true
   register: cf_existing
   until: cf_existing.status == 200
-  retries: 5
-  delay: 8
+  retries: 10
+  delay: 6
   loop:
     - { zone: "{{ cdn_origin_zone }}", name: "{{ cdn_origin_domain_new }}" }
     - { zone: "{{ cdn_front_zone }}", name: "{{ cdn_front_domain_new }}" }

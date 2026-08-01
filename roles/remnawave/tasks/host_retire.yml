@@ -1,0 +1,103 @@
+---
+# Гасит предыдущее плечо ноды: выключает старый хост и убирает его UUID из балансера.
+#
+# Вход: remnawave_retire_uuid — UUID хоста прошлой ротации.
+# Хост НЕ удаляется, а выключается: если новый фронт окажется мёртвым, старое плечо
+# можно вернуть одним тумблером в панели. Домены и ресурс VK чистит rotate_cleanup.yml.
+#
+# ВНИМАНИЕ: selector['values'], не selector.values — второе в Jinja резолвится
+# в метод dict.values и вычистка молча не срабатывает.
+
+- name: Проверка входного UUID гасимого хоста
+  ansible.builtin.assert:
+    that: remnawave_retire_uuid is defined and remnawave_retire_uuid | length > 0
+    fail_msg: "host_retire требует remnawave_retire_uuid"
+
+- name: Сверка, что гасим не текущий хост
+  ansible.builtin.assert:
+    that: remnawave_retire_uuid != (remnawave_host_uuid | default(''))
+    fail_msg: >-
+      Отказ: UUID гасимого хоста совпадает с только что созданным
+      ({{ remnawave_retire_uuid }}) — это выключило бы новое плечо
+
+- name: Проверка существования старого хоста
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/{{ remnawave_retire_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    status_code: [200, 404]
+    return_content: true
+  register: rw_retire_get
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Выключение старого хоста
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/"
+    method: PATCH
+    headers: "{{ remnawave_headers }}"
+    body_format: json
+    body:
+      uuid: "{{ remnawave_retire_uuid }}"
+      isDisabled: true
+    status_code: [200]
+    return_content: true
+  register: rw_retire_off
+  delegate_to: localhost
+  become: false
+  changed_when: rw_retire_off is not skipped
+  when: rw_retire_get.status == 200
+
+- name: Чтение шаблона балансера перед вычисткой
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/subscription-templates/{{ remnawave_balancer_template_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_retire_tpl
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Расчёт списка плеч без старого хоста
+  ansible.builtin.set_fact:
+    rw_retire_tpl_json: "{{ rw_retire_tpl.json.response.templateJson }}"
+    rw_retire_desired: >-
+      {{ ((rw_retire_tpl.json.response.templateJson.remnawave.injectHosts | first).selector['values']
+          | default([], true)) | difference([remnawave_retire_uuid]) }}
+
+- name: 'ПРОВЕРКА: балансер не останется пустым'
+  ansible.builtin.assert:
+    that: rw_retire_desired | length > 0
+    fail_msg: >-
+      Отказ гасить {{ remnawave_retire_uuid }}: это последнее плечо в балансере,
+      снятие увело бы плитку в fallback (проверено 2026-08-01)
+
+- name: Удаление старого UUID из балансера
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/subscription-templates/"
+    method: PATCH
+    headers: "{{ remnawave_headers }}"
+    body_format: json
+    body:
+      uuid: "{{ remnawave_balancer_template_uuid }}"
+      templateJson: >-
+        {{ rw_retire_tpl_json | combine({'remnawave': {'injectHosts': [
+             (rw_retire_tpl_json.remnawave.injectHosts | first)
+             | combine({'selector': {'type': 'uuids', 'values': rw_retire_desired}}, recursive=True)
+           ]}}, recursive=True) }}
+    status_code: [200]
+    return_content: true
+  register: rw_retire_patch
+  delegate_to: localhost
+  become: false
+  changed_when: rw_retire_patch is not skipped
+  when:
+    - remnawave_balancer_selector_mode == 'uuids'
+    - remnawave_retire_uuid in ((rw_retire_tpl_json.remnawave.injectHosts | first).selector['values'] | default([], true))
+
+- name: Итог гашения старого плеча
+  ansible.builtin.debug:
+    msg: >-
+      Старое плечо {{ remnawave_retire_uuid }}:
+      {{ 'хост выключен' if rw_retire_get.status == 200 else 'хоста в панели уже нет' }},
+      плеч в балансере осталось {{ rw_retire_desired | length }}

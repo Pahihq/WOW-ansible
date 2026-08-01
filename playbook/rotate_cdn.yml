@@ -95,6 +95,19 @@
         cdn_front_domain_new: "{{ cdn_state.front_domain }}"
       when: cdn_resuming | bool
 
+    # Прошлая ротация фиксируется ДО перезаписи состояния: без этого UUID старого
+    # хоста теряется, и погасить старое плечо автоматически уже нечем.
+    - name: Запоминание прошлой ротации
+      ansible.builtin.set_fact:
+        cdn_prev: >-
+          {{ {'host_uuid': cdn_state.host_uuid | default(''),
+              'front_domain': cdn_state.front_domain | default(''),
+              'origin_domain': cdn_state.origin_domain | default(''),
+              'vk_resource_id': cdn_state.vk_resource_id | default(''),
+              'inbound_tag': cdn_state.inbound_tag | default('')}
+             if ((cdn_state.status | default('')) == 'active' and not (cdn_resuming | bool))
+             else {} }}
+
     - name: Фиксация начатой ротации
       ansible.builtin.include_role:
         name: cdn_state
@@ -103,6 +116,7 @@
         cdn_state_patch:
           node: "{{ inventory_hostname }}"
           status: in_progress
+          prev: "{{ cdn_prev }}"
           started_at: "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -Iseconds')) }}"
           origin_domain: "{{ cdn_origin_domain_new }}"
           front_domain: "{{ cdn_front_domain_new }}"
@@ -217,6 +231,17 @@
     - name: Включение хоста в балансер
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/balancer_join.yml"
       when: not (cdn_dry_run | bool)
+
+    # Старое плечо гасим только после того, как новое ВСТАЛО в балансер:
+    # порядок обратный оставил бы плитку на одном плече в момент правки шаблона.
+    - name: Гашение старого плеча
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/host_retire.yml"
+      vars:
+        remnawave_retire_uuid: "{{ cdn_prev.host_uuid }}"
+      when:
+        - not (cdn_dry_run | bool)
+        - cdn_retire_previous | bool
+        - (cdn_prev | default({}, true)).host_uuid | default('') | length > 0
 
     - name: Пометка ротации как завершённой
       ansible.builtin.include_role:
