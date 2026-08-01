@@ -1,0 +1,4 @@
+---
+# Файл состояния на управляющей машине: одна ротация на ноду.
+cdn_state_dir: "{{ playbook_dir }}/state"
+cdn_state_file: "{{ cdn_state_dir }}/{{ inventory_hostname }}.json"

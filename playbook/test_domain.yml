@@ -1,0 +1,10 @@
+---
+- name: Проверка генератора доменов (вхолостую)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    cdn_dry_run: true
+    cdn_node_ip: "94.183.229.109"
+  roles:
+    - role: cdn_domain

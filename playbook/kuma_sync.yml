@@ -1,0 +1,25 @@
+---
+# Ставит текущие CDN-фронты пула на мониторинг. Идемпотентен.
+# Пул и домены — из файлов состояния, не из инвентаря.
+#   ansible-playbook playbook/kuma_sync.yml
+- name: Синхронизация мониторов CDN-фронтов
+  hosts: eu_nodes
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Загрузка состояния ротации
+      ansible.builtin.include_role:
+        name: cdn_state
+        tasks_from: load
+
+    - name: Пропуск нод без завершённой ротации
+      ansible.builtin.meta: end_host
+      when: >-
+        (cdn_state | default({}, true)) == {}
+        or (cdn_state.status | default('')) != 'active'
+
+    - name: Постановка фронта на мониторинг
+      ansible.builtin.include_role:
+        name: kuma
+      vars:
+        cdn_front_domain_monitor: "{{ cdn_state.front_domain }}"

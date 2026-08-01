@@ -1,0 +1,140 @@
+---
+# Создаёт (или приводит к нужному виду) хост CDN-фронта в панели.
+# Вход: cdn_front_domain, cdn_inbound_tag, cdn_host_remark
+# Выход: remnawave_host_uuid
+
+- name: Проверка входных параметров хоста
+  ansible.builtin.assert:
+    that:
+      - cdn_front_domain is defined and cdn_front_domain | length > 0
+      - cdn_inbound_tag is defined and cdn_inbound_tag | length > 0
+    fail_msg: "Нужны cdn_front_domain и cdn_inbound_tag"
+
+- name: Получение всех инбаундов конфиг-профилей
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/config-profiles/inbounds"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_inbounds
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Поиск инбаунда по тегу
+  ansible.builtin.set_fact:
+    rw_inbound: "{{ (rw_inbounds.json.response.inbounds | selectattr('tag', 'equalto', cdn_inbound_tag) | list | first) }}"
+
+- name: Остановка при отсутствии инбаунда
+  ansible.builtin.assert:
+    that: rw_inbound is defined and rw_inbound.uuid is defined
+    fail_msg: "Инбаунд с тегом {{ cdn_inbound_tag }} не найден в панели"
+
+# ИСТОЧНИК ИСТИНЫ: extra и path берутся из самого инбаунда, руками не переписываются.
+- name: Извлечение xhttp-параметров инбаунда
+  ansible.builtin.set_fact:
+    rw_inbound_extra: "{{ rw_inbound.rawInbound.streamSettings.xhttpSettings.extra }}"
+    rw_inbound_path: "{{ rw_inbound.rawInbound.streamSettings.xhttpSettings.path }}"
+
+- name: Получение списка хостов
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_hosts
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Поиск существующего хоста по адресу фронта
+  ansible.builtin.set_fact:
+    rw_existing_host: "{{ (rw_hosts.json.response | selectattr('address', 'equalto', cdn_front_domain) | list | first) | default({}, true) }}"
+
+# ВАЖНО: поле называется xhttpExtraParams (строчная h). Вариант xHttpExtraParams
+# панель молча выбрасывает (zod .strip()) — хост создаётся БЕЗ extra и без ошибки.
+- name: Сборка тела запроса хоста
+  ansible.builtin.set_fact:
+    rw_host_body:
+      inbound:
+        configProfileUuid: "{{ rw_inbound.profileUuid }}"
+        configProfileInboundUuid: "{{ rw_inbound.uuid }}"
+      remark: "{{ cdn_host_remark | default('CDN-POOL ' ~ inventory_hostname) }}"
+      address: "{{ cdn_front_domain }}"
+      port: 443
+      path: "{{ rw_inbound_path }}/"
+      sni: "{{ cdn_front_domain }}"
+      host: "{{ cdn_front_domain }}"
+      alpn: "{{ remnawave_host_alpn }}"
+      fingerprint: "{{ remnawave_host_fingerprint }}"
+      securityLayer: "{{ remnawave_host_security_layer }}"
+      xhttpExtraParams: "{{ rw_inbound_extra }}"
+      isHidden: "{{ remnawave_host_hidden }}"
+      isDisabled: false
+      tags: ["{{ remnawave_cdn_host_tag }}"]
+
+- name: Создание хоста CDN-фронта
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/"
+    method: POST
+    headers: "{{ remnawave_headers }}"
+    body_format: json
+    body: "{{ rw_host_body }}"
+    status_code: [200, 201]
+    return_content: true
+  register: rw_host_created
+  delegate_to: localhost
+  become: false
+  changed_when: rw_host_created is not skipped
+  when: rw_existing_host.uuid is not defined
+
+- name: Обновление существующего хоста до нужного состояния
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/"
+    method: PATCH
+    headers: "{{ remnawave_headers }}"
+    body_format: json
+    body: "{{ rw_host_body | combine({'uuid': rw_existing_host.uuid}) }}"
+    status_code: [200]
+    return_content: true
+  register: rw_host_patched
+  delegate_to: localhost
+  become: false
+  changed_when: rw_host_patched is not skipped
+  when:
+    - rw_existing_host.uuid is defined
+    - >-
+      rw_existing_host.xhttpExtraParams != rw_inbound_extra
+      or rw_existing_host.isDisabled | bool
+      or remnawave_cdn_host_tag not in (rw_existing_host.tags | default([]))
+      or rw_existing_host.isHidden != remnawave_host_hidden
+      or rw_existing_host.path != (rw_inbound_path ~ '/')
+
+- name: Фиксация UUID хоста
+  ansible.builtin.set_fact:
+    remnawave_host_uuid: >-
+      {{ (rw_host_created.json.response.uuid
+          if rw_host_created.changed | default(false)
+          else rw_existing_host.uuid) }}
+
+- name: Контрольное чтение созданного хоста
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/{{ remnawave_host_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_host_after
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+# Главный ассерт этапа: расхождение extra хоста и инбаунда = туннель не встанет.
+- name: 'ПРОВЕРКА: extra хоста байт-в-байт совпадает с extra инбаунда'
+  ansible.builtin.assert:
+    that:
+      - rw_host_after.json.response.xhttpExtraParams == rw_inbound_extra
+      - rw_host_after.json.response.address == cdn_front_domain
+      - remnawave_cdn_host_tag in rw_host_after.json.response.tags
+      - not rw_host_after.json.response.isDisabled
+    fail_msg: >-
+      Хост {{ remnawave_host_uuid }} собран неверно.
+      extra совпал: {{ rw_host_after.json.response.xhttpExtraParams == rw_inbound_extra }}
+      (частая причина — поле отправлено как xHttpExtraParams вместо xhttpExtraParams)
+    success_msg: "Хост {{ remnawave_host_uuid }} ({{ cdn_front_domain }}) собран верно, extra синхронен инбаунду {{ cdn_inbound_tag }}"

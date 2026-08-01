@@ -1,0 +1,11 @@
+---
+kuma_venv_python: "{{ playbook_dir }}/../.venv/bin/python"
+kuma_cli: "{{ playbook_dir }}/scripts/kuma_cli.py"
+kuma_env_file: "{{ playbook_dir }}/secrets/kuma.env"
+# Группа «💫CDN + БС» в Kuma.
+kuma_parent_group: 18
+kuma_interval: 60
+kuma_retries: 2
+# Монитор именуется по НОДЕ, а не по домену: при ротации он переезжает на новый
+# фронт, а история проверок и алерты сохраняются.
+kuma_monitor_name: "CDN {{ inventory_hostname }}"

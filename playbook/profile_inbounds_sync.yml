@@ -1,0 +1,112 @@
+---
+# Заводит в конфиг-профиле инбаунды CDN_Pxx по пулу сигнатур.
+#
+# ⚠️ ЭТО ЕДИНСТВЕННЫЙ ПУШ, КОТОРЫЙ РЕСТАРТИТ XRAY НА ВСЕХ НОДАХ ПРОФИЛЯ (§18.2).
+#    Запускать один раз, в окно низкой нагрузки.
+#
+#   предпросмотр (ничего не меняет):  ansible-playbook playbook/profile_inbounds_sync.yml
+#   применение:                       ansible-playbook playbook/profile_inbounds_sync.yml -e apply=true
+#
+- name: Синхронизация инбаундов CDN-пула в конфиг-профиле
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    apply: false
+    cdn_profile_uuid: "bee915e7-a50a-45f3-927f-da114732135e"
+    cdn_inbound_listen: "127.0.0.1"
+    cdn_inbound_port: 10085
+  roles:
+    - role: remnawave
+  tasks:
+    - name: Загрузка пула сигнатур
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/xhttp_signatures.yml"
+
+    - name: Получение конфиг-профиля
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}/api/config-profiles/{{ cdn_profile_uuid }}"
+        headers: "{{ remnawave_headers }}"
+        return_content: true
+      register: cp
+      changed_when: false
+
+    - name: Разбор текущих инбаундов профиля
+      ansible.builtin.set_fact:
+        cp_config: "{{ cp.json.response.config }}"
+        cp_existing_tags: "{{ cp.json.response.config.inbounds | map(attribute='tag') | list }}"
+
+    - name: Слоты, которых ещё нет в профиле
+      ansible.builtin.set_fact:
+        cp_missing: "{{ xhttp_signatures | rejectattr('inbound_tag', 'in', cp_existing_tags) | list }}"
+
+    - name: Сборка инбаундов
+      ansible.builtin.set_fact:
+        cp_rendered: "{{ cp_rendered | default([]) + [ {
+          'tag': item.inbound_tag,
+          'port': cdn_inbound_port,
+          'listen': cdn_inbound_listen,
+          'protocol': 'vless',
+          'settings': {'clients': [], 'decryption': 'none'},
+          'sniffing': {'enabled': true, 'destOverride': ['http', 'tls', 'quic']},
+          'streamSettings': {
+            'network': 'xhttp',
+            'security': 'none',
+            'xhttpSettings': {'mode': item.mode, 'path': item.path, 'extra': item.extra}
+          } } ] }}"
+      loop: "{{ cp_missing }}"
+      loop_control:
+        label: "{{ item.inbound_tag }} {{ item.path }}"
+
+    - name: Предпросмотр
+      ansible.builtin.debug:
+        msg:
+          - "профиль: {{ cp.json.response.name }} ({{ cdn_profile_uuid }})"
+          - "инбаундов сейчас: {{ cp_existing_tags | length }} -> {{ cp_existing_tags | join(', ') }}"
+          - "будет добавлено: {{ cp_missing | length }}"
+          - "теги: {{ cp_missing | map(attribute='inbound_tag') | join(', ') }}"
+          - "ПРИМЕНЕНИЕ: {{ 'ДА (рестарт xray на всех нодах профиля)' if apply | bool else 'НЕТ — это предпросмотр, добавь -e apply=true' }}"
+
+    - name: Проверка отсутствия конфликта портов с не-xhttp инбаундами
+      ansible.builtin.assert:
+        that: >-
+          {{ cp_config.inbounds
+             | selectattr('port', 'equalto', cdn_inbound_port)
+             | selectattr('streamSettings.network', 'defined')
+             | rejectattr('streamSettings.network', 'equalto', 'xhttp')
+             | list | length == 0 }}
+        fail_msg: "На порту {{ cdn_inbound_port }} есть не-xhttp инбаунд — так делать нельзя"
+
+    - name: Запись новых инбаундов в профиль
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}/api/config-profiles/"
+        method: PATCH
+        headers: "{{ remnawave_headers }}"
+        body_format: json
+        body:
+          uuid: "{{ cdn_profile_uuid }}"
+          config: "{{ cp_config | combine({'inbounds': cp_config.inbounds + (cp_rendered | default([]))}) }}"
+        status_code: [200]
+        return_content: true
+      register: cp_patched
+      changed_when: cp_patched is not skipped
+      when:
+        - apply | bool
+        - cp_missing | length > 0
+
+    - name: Контрольное чтение профиля
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}/api/config-profiles/{{ cdn_profile_uuid }}"
+        headers: "{{ remnawave_headers }}"
+        return_content: true
+      register: cp_after
+      changed_when: false
+      when: apply | bool
+
+    - name: 'ПРОВЕРКА: все слоты на месте'
+      ansible.builtin.assert:
+        that:
+          - (xhttp_signatures | map(attribute='inbound_tag') | list)
+            | difference(cp_after.json.response.config.inbounds | map(attribute='tag') | list) | length == 0
+        success_msg: "В профиле {{ cp_after.json.response.config.inbounds | length }} инбаундов, все 30 слотов заведены"
+      when: apply | bool

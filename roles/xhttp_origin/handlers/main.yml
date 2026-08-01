@@ -1,0 +1,13 @@
+---
+- name: Перезапуск backend сайта
+  ansible.builtin.systemd:
+    name: xhttp-site-backend.service
+    state: restarted
+    enabled: true
+    daemon_reload: true
+
+- name: Перезапуск nginx
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate nginx
+    chdir: "{{ stack_dir }}"
+  changed_when: true

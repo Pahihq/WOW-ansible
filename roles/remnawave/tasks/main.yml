@@ -1,0 +1,16 @@
+---
+- name: Чтение токена панели
+  ansible.builtin.slurp:
+    src: "{{ remnawave_token_file }}"
+  register: remnawave_token_raw
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Установка заголовков авторизации
+  ansible.builtin.set_fact:
+    remnawave_headers:
+      Authorization: "Bearer {{ (remnawave_token_raw.content | b64decode) | trim }}"
+      Content-Type: "application/json"
+  no_log: true

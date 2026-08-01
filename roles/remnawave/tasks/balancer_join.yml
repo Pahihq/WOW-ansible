@@ -1,0 +1,121 @@
+---
+# Вписывает UUID нового хоста в балансер (remnawave.injectHosts) XRAY_JSON-шаблона
+# и заодно вычищает UUID хостов, которых в панели больше нет.
+#
+# Почему вычистка обязательна: 2026-08-01 в шаблоне остались 3 UUID удалённых хостов,
+# балансер собрался с нулём аутбаундов и ушёл в fallback: block — плитка умерла молча.
+#
+# Вход: remnawave_host_uuid
+#
+# ВНИМАНИЕ: обращаться только selector['values'].
+# Запись selector.values в Jinja резолвится в метод dict.values, а не в ключ —
+# список молча превращается в builtin и вычистка UUID не работает.
+
+- name: Проверка входного UUID хоста
+  ansible.builtin.assert:
+    that: remnawave_host_uuid is defined and remnawave_host_uuid | length > 0
+    fail_msg: "balancer_join требует remnawave_host_uuid (запусти host_upsert раньше)"
+
+- name: Получение XRAY_JSON-шаблона балансера
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/subscription-templates/{{ remnawave_balancer_template_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_tpl
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Получение актуального списка хостов
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_hosts_all
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Разбор текущего состояния балансера
+  ansible.builtin.set_fact:
+    rw_tpl_json: "{{ rw_tpl.json.response.templateJson }}"
+    rw_live_uuids: "{{ rw_hosts_all.json.response | map(attribute='uuid') | list }}"
+    # Носитель шаблона не может подставить сам себя — панель его пропустит,
+    # и балансер останется без аутбаундов (проверено 2026-07-24).
+    rw_carrier_uuids: >-
+      {{ rw_hosts_all.json.response
+         | selectattr('xrayJsonTemplateUuid', 'defined')
+         | selectattr('xrayJsonTemplateUuid', 'equalto', remnawave_balancer_template_uuid)
+         | map(attribute='uuid') | list }}
+
+- name: Текущие UUID в балансере
+  ansible.builtin.set_fact:
+    rw_current_uuids: >-
+      {{ (rw_tpl_json.remnawave.injectHosts | first).selector['values'] | default([], true)
+         if (rw_tpl_json.remnawave.injectHosts | default([]) | length > 0)
+            and ((rw_tpl_json.remnawave.injectHosts | first).selector.type | default('')) == 'uuids'
+         else [] }}
+
+- name: Расчёт целевого списка UUID
+  ansible.builtin.set_fact:
+    rw_dead_uuids: "{{ rw_current_uuids | difference(rw_live_uuids) }}"
+    rw_desired_uuids: >-
+      {{ ((rw_current_uuids | intersect(rw_live_uuids)) + [remnawave_host_uuid])
+         | difference(rw_carrier_uuids) | unique }}
+
+- name: Сообщение о вычищенных мёртвых UUID
+  ansible.builtin.debug:
+    msg: "Из балансера удалены UUID несуществующих хостов: {{ rw_dead_uuids | join(', ') }}"
+  when: rw_dead_uuids | length > 0
+
+- name: Сборка нового блока injectHosts
+  ansible.builtin.set_fact:
+    rw_inject_entry: >-
+      {{
+        {'selector': {'type': 'uuids', 'values': rw_desired_uuids},
+         'tagPrefix': remnawave_balancer_tag_prefix, 'selectFrom': 'ALL'}
+        if remnawave_balancer_selector_mode == 'uuids'
+        else
+        {'selector': {'type': 'tagRegex', 'pattern': remnawave_balancer_tag_pattern},
+         'tagPrefix': remnawave_balancer_tag_prefix, 'selectFrom': 'ALL'}
+      }}
+
+- name: Обновление шаблона балансера
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/subscription-templates/"
+    method: PATCH
+    headers: "{{ remnawave_headers }}"
+    body_format: json
+    body:
+      uuid: "{{ remnawave_balancer_template_uuid }}"
+      templateJson: "{{ rw_tpl_json | combine({'remnawave': {'injectHosts': [rw_inject_entry]}}, recursive=True) }}"
+    status_code: [200]
+    return_content: true
+  register: rw_tpl_patched
+  delegate_to: localhost
+  become: false
+  changed_when: rw_tpl_patched is not skipped
+  when: (rw_tpl_json.remnawave.injectHosts | default([])) != [rw_inject_entry]
+
+- name: Контрольное чтение шаблона
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/subscription-templates/{{ remnawave_balancer_template_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_tpl_after
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: 'ПРОВЕРКА: хост состоит в балансере'
+  ansible.builtin.assert:
+    that:
+      - >-
+        (remnawave_host_uuid in
+          ((rw_tpl_after.json.response.templateJson.remnawave.injectHosts | first).selector['values'] | default([], true)))
+        or ((rw_tpl_after.json.response.templateJson.remnawave.injectHosts | first).selector.type == 'tagRegex')
+      - (rw_tpl_after.json.response.templateJson.remnawave.injectHosts | first).selector['values'] | default(['x'], true) | length > 0
+    fail_msg: "Хост {{ remnawave_host_uuid }} не попал в балансер, либо список UUID пуст (балансер уйдёт в fallback)"
+    success_msg: >-
+      Балансер режим={{ remnawave_balancer_selector_mode }},
+      плеч в пуле: {{ (rw_tpl_after.json.response.templateJson.remnawave.injectHosts | first).selector['values'] | default([], true) | length }}

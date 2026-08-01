@@ -1,0 +1,44 @@
+---
+# Приводит панель в соответствие с текущим состоянием CDN-фронтов: создаёт/чинит хост
+# и вписывает его в балансер. Идемпотентен.
+#
+#   ansible-playbook playbook/panel_sync.yml            # по всем нодам пула
+#   ansible-playbook playbook/panel_sync.yml --limit node_ch1
+#
+# Состав пула определяется НЕ инвентарём, а файлами состояния: нода входит в пул,
+# если у неё есть завершённая ротация (status: active). Домены берутся оттуда же —
+# в инвентаре они протухали после первой же ротации.
+- name: Синхронизация CDN-хостов и балансера в Remnawave
+  hosts: eu_nodes
+  gather_facts: false
+  serial: 1
+  roles:
+    - role: remnawave
+  tasks:
+    - name: Загрузка состояния ротации
+      ansible.builtin.include_role:
+        name: cdn_state
+        tasks_from: load
+
+    - name: Пропуск нод без завершённой ротации
+      ansible.builtin.meta: end_host
+      when: >-
+        (cdn_state | default({}, true)) == {}
+        or (cdn_state.status | default('')) != 'active'
+
+    - name: Домены и инбаунд из состояния
+      ansible.builtin.set_fact:
+        cdn_front_domain: "{{ cdn_state.front_domain }}"
+        cdn_inbound_tag: "{{ cdn_state.inbound_tag }}"
+
+    - name: Создание или починка хоста CDN-фронта
+      ansible.builtin.include_tasks: ../roles/remnawave/tasks/host_upsert.yml
+
+    - name: Включение хоста в балансер
+      ansible.builtin.include_tasks: ../roles/remnawave/tasks/balancer_join.yml
+
+    - name: Итог
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: фронт {{ cdn_front_domain }} →
+          хост {{ remnawave_host_uuid }} (инбаунд {{ cdn_inbound_tag }}) в балансере

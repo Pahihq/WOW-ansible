@@ -1,0 +1,169 @@
+---
+# Генерирует пару свежих доменов и заводит A-запись origin в Cloudflare.
+# Выход: cdn_origin_domain_new, cdn_front_domain_new
+#
+# Оба — СЕРОЕ облачко (proxied: false). Оранжевое терминирует TLS и ломает
+# и Reality, и CDN-фронтинг.
+#
+# CNAME фронта здесь НЕ создаётся: цель отдаёт VK после создания ресурса (setup-cdn.sh).
+
+- name: Чтение credentials Cloudflare
+  ansible.builtin.slurp:
+    src: "{{ cdn_domain_env_file }}"
+  register: cf_env_raw
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Разбор credentials
+  ansible.builtin.set_fact:
+    cf_token: "{{ (cf_env_raw.content | b64decode | regex_search('CLOUDFLARE_API_TOKEN=\"?([^\"\\n]+)', '\\1') | first) }}"
+    cf_account: "{{ (cf_env_raw.content | b64decode | regex_search('CLOUDFLARE_ACCOUNT_ID=\"?([^\"\\n]+)', '\\1') | first) }}"
+  no_log: true
+
+- name: Получение зон аккаунта
+  ansible.builtin.uri:
+    url: "{{ cloudflare_api_base }}/zones?account.id={{ cf_account }}&per_page=50"
+    headers:
+      Authorization: "Bearer {{ cf_token }}"
+    return_content: true
+  register: cf_zones
+  until: cf_zones.status == 200
+  retries: 5
+  delay: 8
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Отбор пригодных зон
+  ansible.builtin.set_fact:
+    cf_usable_zones: >-
+      {{ cf_zones.json.result
+         | selectattr('name', 'in', cdn_domain_zones)
+         | selectattr('status', 'equalto', 'active') | list }}
+
+- name: Остановка при отсутствии зон
+  ansible.builtin.assert:
+    that: cf_usable_zones | length > 0
+    fail_msg: "Токен Cloudflare не видит ни одной зоны из {{ cdn_domain_zones | join(', ') }}"
+
+# Слова, уже засветившиеся в зонах, использовать нельзя: новый домен не должен
+# перекликаться со старым, иначе связать их со стороны — дело одной минуты.
+- name: Получение существующих записей всех зон
+  ansible.builtin.uri:
+    url: "{{ cloudflare_api_base }}/zones/{{ item.id }}/dns_records?per_page=200"
+    headers:
+      Authorization: "Bearer {{ cf_token }}"
+    return_content: true
+  register: cf_all_records
+  until: cf_all_records.status == 200
+  retries: 5
+  delay: 8
+  loop: "{{ cf_usable_zones }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Сбор занятых имён
+  ansible.builtin.set_fact:
+    cf_taken_names: >-
+      {{ cf_all_records.results | map(attribute='json.result') | flatten
+         | map(attribute='name') | join(' ') }}
+
+- name: Отсев слов, уже засветившихся в зонах
+  ansible.builtin.set_fact:
+    cdn_free_origin_words: "{{ cdn_domain_origin_words | reject('in', cf_taken_names) | list }}"
+    cdn_free_front_words: "{{ cdn_domain_front_words | reject('in', cf_taken_names) | list }}"
+    cdn_free_front_suffix: "{{ cdn_domain_front_suffix | reject('in', cf_taken_names) | list }}"
+
+- name: Остановка при исчерпании словаря
+  ansible.builtin.assert:
+    that:
+      - cdn_free_origin_words | length > 0
+      - cdn_free_front_words | length > 0
+      - cdn_free_front_suffix | length > 0
+    fail_msg: >-
+      Свободные слова кончились (origin {{ cdn_free_origin_words | length }},
+      front {{ cdn_free_front_words | length }}/{{ cdn_free_front_suffix | length }}).
+      Расширь словари в roles/cdn_domain/defaults или вычисти старые записи из зон.
+
+- name: Генерация кандидатов
+  ansible.builtin.set_fact:
+    cdn_origin_zone: "{{ cf_usable_zones | random }}"
+    cdn_front_zone: "{{ cf_usable_zones | random }}"
+    cdn_origin_label: "{{ cdn_free_origin_words | random }}{{ 100 | random(start=10) }}"
+    cdn_front_label: "{{ cdn_free_front_words | random }}-{{ cdn_free_front_suffix | random }}{{ 100 | random(start=10) }}"
+
+- name: Сборка полных имён
+  ansible.builtin.set_fact:
+    cdn_origin_domain_new: "{{ cdn_origin_label }}.{{ cdn_origin_zone.name }}"
+    cdn_front_domain_new: "{{ cdn_front_label }}.{{ cdn_front_zone.name }}"
+
+- name: Проверка, что имена ещё не заняты
+  ansible.builtin.uri:
+    url: "{{ cloudflare_api_base }}/zones/{{ item.zone.id }}/dns_records?name={{ item.name }}"
+    headers:
+      Authorization: "Bearer {{ cf_token }}"
+    return_content: true
+  register: cf_existing
+  until: cf_existing.status == 200
+  retries: 5
+  delay: 8
+  loop:
+    - { zone: "{{ cdn_origin_zone }}", name: "{{ cdn_origin_domain_new }}" }
+    - { zone: "{{ cdn_front_zone }}", name: "{{ cdn_front_domain_new }}" }
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+# Диагностика без раскрытия токена: no_log прячет и причину падения тоже,
+# поэтому статусы вынимаем отдельной задачей.
+- name: Статусы проверки занятости имён
+  ansible.builtin.assert:
+    that: cf_existing.results | map(attribute='status') | unique == [200]
+    fail_msg: >-
+      Cloudflare ответил {{ cf_existing.results | map(attribute='status') | list }}
+      на проверку занятости имён (429 = лимит запросов, 403 = прав не хватает)
+
+- name: Остановка при коллизии имён
+  ansible.builtin.assert:
+    that: (cf_existing.results | map(attribute='json.result') | map('length') | sum) == 0
+    fail_msg: "Сгенерированное имя уже занято в Cloudflare — перезапусти ротацию"
+
+- name: Создание A-записи origin (серое облачко)
+  ansible.builtin.uri:
+    url: "{{ cloudflare_api_base }}/zones/{{ cdn_origin_zone.id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_token }}"
+    body_format: json
+    body:
+      type: A
+      name: "{{ cdn_origin_domain_new }}"
+      content: "{{ cdn_node_ip }}"
+      ttl: 300
+      proxied: false
+      comment: "CDN rotation origin, managed by ansible"
+    status_code: [200]
+    return_content: true
+  register: cf_a_created
+  delegate_to: localhost
+  become: false
+  changed_when: cf_a_created is not skipped
+  when: not (cdn_dry_run | default(false) | bool)
+  no_log: true
+
+- name: Итог генерации доменов
+  ansible.builtin.debug:
+    msg:
+      - "origin: {{ cdn_origin_domain_new }} -> A {{ cdn_node_ip }} (серое облачко)"
+      - "фронт:  {{ cdn_front_domain_new }} (CNAME появится после создания ресурса VK)"
+      - "{{ 'DRY-RUN: записи не создавались' if (cdn_dry_run | default(false) | bool) else 'A-запись создана' }}"

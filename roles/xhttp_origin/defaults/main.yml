@@ -1,0 +1,28 @@
+---
+site_repo: https://github.com/Pahihq/xhttp-selfsteal.git
+site_repo_version: 3a7506cd640346e73a791999a0928f732d4420d3
+stack_dir: /opt/remnanode/nginx
+site_repo_dir: "{{ stack_dir }}/xhttp-selfsteal"
+site_root: "{{ stack_dir }}/site/{{ primary_domain }}"
+letsencrypt_dir: "{{ stack_dir }}/letsencrypt"
+certbot_email: admin@wowsecure.ru
+xray_proxy_pass: http://127.0.0.1:10085
+available_site_variants:
+  - city-frame
+  - clearbook
+  - deskroom
+  - fastletter
+  - form-school
+  - green-index
+  - mediaroute
+  - nodewatch-console
+  - north-language
+  - orbit
+  - pawline
+  - rentbase
+  - safebox
+  - sidequest
+  - storeflow
+  - tideline
+  - veloforge
+  - wattboard

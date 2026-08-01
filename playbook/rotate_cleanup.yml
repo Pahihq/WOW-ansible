@@ -1,0 +1,113 @@
+---
+# Вычищает мусор незавершённых ротаций по файлам состояния:
+# A-запись origin в Cloudflare, CNAME фронта, ресурс VK, каталог сайта на ноде.
+#
+#   предпросмотр: ansible-playbook playbook/rotate_cleanup.yml --limit node_ch1
+#   применение:   ansible-playbook playbook/rotate_cleanup.yml --limit node_ch1 -e apply=true
+#
+# Ротации со статусом active не трогаются никогда — только in_progress/failed.
+- name: Чистка брошенных ротаций
+  hosts: eu_nodes
+  gather_facts: false
+  serial: 1
+  vars:
+    apply: false
+  tasks:
+    - name: Загрузка состояния
+      ansible.builtin.include_role:
+        name: cdn_state
+        tasks_from: load
+
+    - name: Пропуск нод без мусора
+      ansible.builtin.meta: end_host
+      when: (cdn_state | default({}, true)) == {} or (cdn_state.status | default('')) == 'active'
+
+    - name: Что будет вычищено
+      ansible.builtin.debug:
+        msg:
+          - "нода:    {{ inventory_hostname }} (статус {{ cdn_state.status | default('?') }})"
+          - "origin:  {{ cdn_state.origin_domain | default('-') }} (A-запись + каталог сайта)"
+          - "фронт:   {{ cdn_state.front_domain | default('-') }} (CNAME)"
+          - "VK:      ресурс {{ cdn_state.vk_resource_id | default('не создавался') }}"
+          - "режим:   {{ 'УДАЛЕНИЕ' if apply | bool else 'предпросмотр, добавь -e apply=true' }}"
+
+    - name: Чтение credentials Cloudflare
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/secrets/.env"
+      register: cl_env
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Разбор credentials
+      ansible.builtin.set_fact:
+        cl_token: "{{ (cl_env.content | b64decode | regex_search('CLOUDFLARE_API_TOKEN=\"?([^\"\\n]+)', '\\1') | first) }}"
+        cl_account: "{{ (cl_env.content | b64decode | regex_search('CLOUDFLARE_ACCOUNT_ID=\"?([^\"\\n]+)', '\\1') | first) }}"
+      no_log: true
+
+    - name: Получение зон
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/zones?account.id={{ cl_account }}&per_page=50"
+        headers: { Authorization: "Bearer {{ cl_token }}" }
+        return_content: true
+      register: cl_zones
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+
+    - name: Поиск DNS-записей мусорных доменов
+      ansible.builtin.uri:
+        url: >-
+          https://api.cloudflare.com/client/v4/zones/{{ (cl_zones.json.result
+          | selectattr('name', 'equalto', item.split('.')[-2:] | join('.')) | list | first).id
+          }}/dns_records?name={{ item }}
+        headers: { Authorization: "Bearer {{ cl_token }}" }
+        return_content: true
+      register: cl_recs
+      loop: "{{ [cdn_state.origin_domain | default(''), cdn_state.front_domain | default('')] | reject('equalto', '') | list }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+
+    - name: Удаление DNS-записей
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ item.0.json.result[0].zone_id }}/dns_records/{{ item.0.json.result[0].id }}"
+        method: DELETE
+        headers: { Authorization: "Bearer {{ cl_token }}" }
+        status_code: [200]
+      loop: "{{ cl_recs.results | zip(cl_recs.results) | list }}"
+      loop_control:
+        label: "{{ item.0.item }}"
+      when:
+        - apply | bool
+        - item.0.json.result | length > 0
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      no_log: true
+
+    - name: Удаление каталога сайта на ноде
+      ansible.builtin.file:
+        path: "/opt/remnanode/nginx/site/{{ cdn_state.origin_domain }}"
+        state: absent
+      when:
+        - apply | bool
+        - cdn_state.origin_domain is defined
+      become: true
+
+    - name: Сброс состояния
+      ansible.builtin.file:
+        path: "{{ cdn_state_file }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      when: apply | bool
+
+    - name: Итог
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Вычищено: ' ~ (cdn_state.origin_domain | default('-')) ~ ' / ' ~ (cdn_state.front_domain | default('-'))
+             ~ (('. Ресурс VK ' ~ cdn_state.vk_resource_id ~ ' удали вручную в консоли VK.') if cdn_state.vk_resource_id is defined else '')
+             if apply | bool else 'Это был предпросмотр — ничего не удалено.' }}

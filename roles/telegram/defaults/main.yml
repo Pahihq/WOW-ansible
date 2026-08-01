@@ -1,0 +1,4 @@
+---
+telegram_env_file: "{{ playbook_dir }}/secrets/telegram.env"
+telegram_api: "https://api.telegram.org"
+telegram_parse_mode: HTML

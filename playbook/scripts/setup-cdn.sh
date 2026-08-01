@@ -7,6 +7,7 @@ CONFIG_PATH="${VKCS_CONFIG_PATH:-$PWD/.env}"
 CDN_DOMAIN=""
 ORIGIN=""
 DRY_RUN=false
+STATE_ONLY=false
 
 LAST_HTTP_CODE=""
 LAST_HTTP_BODY=""
@@ -25,6 +26,8 @@ usage() {
 
 Дополнительный параметр:
   --dry-run                 Выполнять только проверки и показать план изменений
+  --state                   Ничего не менять: вывести в stdout JSON состояния ресурса
+                            (found/id/status/active/sslEnabled/ssl_automated). --origin не нужен.
   -h, --help                Показать справку
 
 Origin-протокол всегда MATCH. CNAME и Let's Encrypt настраиваются автоматически.
@@ -730,6 +733,10 @@ main() {
         DRY_RUN=true
         shift
         ;;
+      --state)
+        STATE_ONLY=true
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -741,6 +748,10 @@ main() {
   done
 
   [[ -n "$CDN_DOMAIN" ]] || die "Укажите --cdn"
+  # В режиме --state origin не требуется: ресурс ищется по CNAME.
+  if $STATE_ONLY && [[ -z "$ORIGIN" ]]; then
+    ORIGIN="state.invalid"
+  fi
   [[ -n "$ORIGIN" ]] || die "Укажите --origin"
 
   require_command curl
@@ -752,6 +763,22 @@ main() {
   trap cleanup EXIT
 
   authenticate_vk
+
+  # Режим опроса состояния: используется плейбуком как гейт перед настройкой панели.
+  # Правило: ресурс создан и VK сообщает ssl=true -> идём настраивать хосты,
+  # edge дозреет сам. Живая доступность фронта проверяется мониторингом, а не здесь.
+  if $STATE_ONLY; then
+    local state_res
+    state_res=$(find_vk_resource)
+    if [[ -z "$state_res" ]]; then
+      printf '{"found":false}\n'
+    else
+      jq -c '{found:true, id:.id, status:.status, active:.active, enabled:.enabled,
+              sslEnabled:.sslEnabled, ssl_automated:.ssl_automated}' <<<"$state_res"
+    fi
+    exit 0
+  fi
+
   verify_cloudflare_token
 
   local vk_target

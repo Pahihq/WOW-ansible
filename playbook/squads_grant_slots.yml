@@ -1,0 +1,91 @@
+---
+# Выдаёт инбаунды-слоты CDN_Pxx тем же внутренним сквадам, у которых есть эталонный
+# инбаунд (CDNVK).
+#
+# ЗАЧЕМ: инбаунд без сквада невидим юзеру. Панель отдаёт в подписке только те хосты,
+# чей инбаунд входит в сквад пользователя. Без этого шага хост после ротации попадает
+# в балансер, но в клиентский конфиг НЕ приходит — плечо есть только на бумаге.
+#
+#   предпросмотр: ansible-playbook playbook/squads_grant_slots.yml
+#   применение:   ansible-playbook playbook/squads_grant_slots.yml -e apply=true
+- name: Выдача слотов CDN внутренним сквадам
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    apply: false
+    reference_inbound_tag: CDNVK
+  roles:
+    - role: remnawave
+  tasks:
+    - name: Получение инбаундов и сквадов
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}{{ item }}"
+        headers: "{{ remnawave_headers }}"
+        return_content: true
+      register: gs
+      loop: ['/api/config-profiles/inbounds', '/api/internal-squads/']
+      changed_when: false
+
+    - name: Разбор
+      ansible.builtin.set_fact:
+        all_inbounds: "{{ gs.results[0].json.response.inbounds }}"
+        all_squads: "{{ gs.results[1].json.response.internalSquads }}"
+
+    - name: UUID слотов и эталонного инбаунда
+      ansible.builtin.set_fact:
+        slot_uuids: "{{ all_inbounds | selectattr('tag', 'match', '^CDN_P[0-9][0-9]$') | map(attribute='uuid') | list }}"
+        ref_uuid: "{{ (all_inbounds | selectattr('tag', 'equalto', reference_inbound_tag) | list | first).uuid }}"
+
+    - name: Сквады, у которых есть эталонный инбаунд
+      ansible.builtin.set_fact:
+        target_squads: >-
+          {{ all_squads
+             | selectattr('inbounds', 'defined')
+             | rejectattr('inbounds', 'equalto', [])
+             | selectattr('inbounds', 'defined') | list
+             | json_query('[?contains(inbounds[].uuid, `' ~ ref_uuid ~ '`)]') }}
+
+    - name: Предпросмотр
+      ansible.builtin.debug:
+        msg:
+          - "слотов CDN_Pxx: {{ slot_uuids | length }}"
+          - "сквады-получатели: {{ target_squads | map(attribute='name') | join(', ') }}"
+          - "инбаундов у них сейчас: {{ target_squads | map(attribute='inbounds') | map('length') | list }}"
+          - "{{ 'ПРИМЕНЯЕМ' if apply | bool else 'предпросмотр — добавь -e apply=true' }}"
+
+    - name: Выдача слотов сквадам
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}/api/internal-squads/"
+        method: PATCH
+        headers: "{{ remnawave_headers }}"
+        body_format: json
+        body:
+          uuid: "{{ item.uuid }}"
+          inbounds: "{{ ((item.inbounds | map(attribute='uuid') | list) + slot_uuids) | unique }}"
+        status_code: [200]
+        return_content: true
+      loop: "{{ target_squads }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: sq_patched
+      changed_when: sq_patched is not skipped
+      when: apply | bool
+
+    - name: Контрольное чтение
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}/api/config-profiles/inbounds"
+        headers: "{{ remnawave_headers }}"
+        return_content: true
+      register: after
+      changed_when: false
+      when: apply | bool
+
+    - name: 'ПРОВЕРКА: слоты выданы сквадам'
+      ansible.builtin.assert:
+        that:
+          - (after.json.response.inbounds | selectattr('tag', 'equalto', 'CDN_P01') | list | first).activeSquads | length > 0
+        success_msg: >-
+          CDN_P01 выдан {{ (after.json.response.inbounds | selectattr('tag', 'equalto', 'CDN_P01')
+          | list | first).activeSquads | length }} сквадам — плечи на новых слотах видны юзерам
+      when: apply | bool

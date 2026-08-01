@@ -1,0 +1,82 @@
+---
+# Выбирает СВОБОДНЫЙ слот сигнатуры для ротации.
+# Занятым считается слот, чей инбаунд уже используется живым хостом с тегом CDN_POOL.
+# Выход: cdn_slot (весь словарь слота), cdn_inbound_tag, cdn_path
+#
+# Слот определяет path И все имена cookie разом — поэтому при каждой ротации
+# сигнатура фронта меняется целиком, а не только домен.
+
+- name: Загрузка пула сигнатур
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/vars/xhttp_signatures.yml"
+
+- name: Получение хостов и инбаундов
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}{{ item }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_slot_lookup
+  loop:
+    - /api/hosts/
+    - /api/config-profiles/inbounds
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Разбор занятых инбаундов
+  ansible.builtin.set_fact:
+    rw_all_hosts: "{{ rw_slot_lookup.results[0].json.response }}"
+    rw_all_inbounds: "{{ rw_slot_lookup.results[1].json.response.inbounds }}"
+
+- name: Определение инбаундов, занятых хостами CDN-пула
+  ansible.builtin.set_fact:
+    rw_busy_inbound_uuids: >-
+      {{ rw_all_hosts
+         | selectattr('tags', 'defined')
+         | selectattr('tags', 'contains', remnawave_cdn_host_tag)
+         | rejectattr('uuid', 'equalto', cdn_retire_host_uuid | default(''))
+         | map(attribute='inbound.configProfileInboundUuid') | list }}
+
+- name: Перевод занятых UUID инбаундов в теги
+  ansible.builtin.set_fact:
+    rw_busy_inbound_tags: >-
+      {{ rw_all_inbounds
+         | selectattr('uuid', 'in', rw_busy_inbound_uuids)
+         | map(attribute='tag') | list }}
+
+# Инбаунд CDNVK — это фактически слот P07 (та же сигнатура), учитываем его как занятый.
+- name: Сопоставление легаси-инбаунда со слотом
+  ansible.builtin.set_fact:
+    rw_busy_slot_tags: >-
+      {{ rw_busy_inbound_tags + (['CDN_P07'] if 'CDNVK' in rw_busy_inbound_tags else []) }}
+
+- name: Список слотов, доступных для ротации
+  ansible.builtin.set_fact:
+    rw_free_slots: >-
+      {{ xhttp_signatures
+         | rejectattr('inbound_tag', 'in', rw_busy_slot_tags)
+         | selectattr('inbound_tag', 'in', (rw_all_inbounds | map(attribute='tag') | list))
+         | list }}
+
+- name: Остановка при отсутствии свободных слотов
+  ansible.builtin.assert:
+    that: rw_free_slots | length > 0
+    fail_msg: >-
+      Нет свободных слотов сигнатур. Занято: {{ rw_busy_slot_tags | join(', ') }}.
+      Либо заведи инбаунды CDN_Pxx в профиле (playbook/profile_inbounds_sync.yml),
+      либо освободи слоты ретайром старых хостов.
+
+- name: Выбор слота
+  ansible.builtin.set_fact:
+    cdn_slot: "{{ rw_free_slots | first }}"
+
+- name: Фиксация параметров слота
+  ansible.builtin.set_fact:
+    cdn_inbound_tag: "{{ cdn_slot.inbound_tag }}"
+    cdn_path: "{{ cdn_slot.path }}"
+
+- name: Выбранный слот
+  ansible.builtin.debug:
+    msg: >-
+      Слот {{ cdn_slot.slot }} ({{ cdn_slot.legend }}): инбаунд {{ cdn_inbound_tag }},
+      path {{ cdn_path }}, seqKey {{ cdn_slot.extra.seqKey }}, sessionIDKey {{ cdn_slot.extra.sessionIDKey }}

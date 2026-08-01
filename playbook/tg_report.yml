@@ -1,0 +1,15 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_role: { name: telegram }
+      vars:
+        telegram_message: |-
+          <b>Ротация CDN выполнена</b>
+          нода: <code>node_ch1</code> (45.95.232.74)
+          origin: <code>arvi42.zorelium.site</code>
+          фронт: <code>pulse-orbi56.zorelium.site</code>
+          инбаунд: <code>CDN_P01</code>  path: <code>/api/library/sync</code>
+          ресурс VK: <code>5467859</code>
+          плеч в балансере: 3

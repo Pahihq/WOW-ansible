@@ -1,0 +1,14 @@
+---
+- name: Проверка отчётности в Telegram
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_role:
+        name: telegram
+      vars:
+        telegram_message: |-
+          <b>WOW VPN · автоматизация ротации CDN</b>
+          Канал отчётности подключён и проверен.
+          Дальше сюда будут падать отчёты по каждой ротации:
+          нода, origin, фронт, инбаунд и path, ресурс VK, UUID хоста, число плеч в балансере.

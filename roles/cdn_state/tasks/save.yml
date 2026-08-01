@@ -1,0 +1,16 @@
+---
+# Дописывает поля в состояние. Вход: cdn_state_patch (словарь).
+# Пишется ПОСЛЕ каждого внешнего действия — чтобы упавший прогон было чем продолжить
+# и чем вычистить: без этого осиротевшие A-записи и ресурсы VK ищутся руками.
+- name: Обновление состояния
+  ansible.builtin.copy:
+    content: "{{ (cdn_state | default({}, true) | combine(cdn_state_patch)) | to_nice_json }}"
+    dest: "{{ cdn_state_file }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Перечитывание состояния в память
+  ansible.builtin.set_fact:
+    cdn_state: "{{ cdn_state | default({}, true) | combine(cdn_state_patch) }}"

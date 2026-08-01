@@ -1,0 +1,73 @@
+---
+# Включает нужный xHTTP-инбаунд на ноде, сохраняя уже активные.
+# ⚠️ Пуш конфигурации ноды РЕСТАРТИТ на ней xray — живые клиенты этой ноды переподключатся (§18.2).
+#    Задевает только эту ноду, не весь профиль.
+#
+# Вход: cdn_node_uuid, cdn_inbound_tag
+
+- name: Получение состояния ноды
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes/{{ cdn_node_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_node
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Разбор активных инбаундов ноды
+  ansible.builtin.set_fact:
+    rw_node_profile: "{{ rw_node.json.response.configProfile.activeConfigProfileUuid }}"
+    rw_node_active_uuids: "{{ rw_node.json.response.configProfile.activeInbounds | map(attribute='uuid') | list }}"
+    rw_node_active_tags: "{{ rw_node.json.response.configProfile.activeInbounds | map(attribute='tag') | list }}"
+
+- name: Поиск UUID нужного инбаунда
+  ansible.builtin.set_fact:
+    rw_target_inbound_uuid: >-
+      {{ (rw_all_inbounds | selectattr('tag', 'equalto', cdn_inbound_tag) | list | first).uuid }}
+
+- name: Проверка, что инбаунд из того же профиля, что и нода
+  ansible.builtin.assert:
+    that: >-
+      (rw_all_inbounds | selectattr('tag', 'equalto', cdn_inbound_tag)
+       | list | first).profileUuid == rw_node_profile
+    fail_msg: >-
+      Инбаунд {{ cdn_inbound_tag }} лежит в другом конфиг-профиле, чем нода
+      {{ inventory_hostname }} — нода может иметь только один активный профиль.
+
+- name: Включение инбаунда на ноде
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes/"
+    method: PATCH
+    headers: "{{ remnawave_headers }}"
+    body_format: json
+    body:
+      uuid: "{{ cdn_node_uuid }}"
+      configProfile:
+        activeConfigProfileUuid: "{{ rw_node_profile }}"
+        activeInbounds: "{{ (rw_node_active_uuids + [rw_target_inbound_uuid]) | unique }}"
+    status_code: [200]
+    return_content: true
+  register: rw_node_patched
+  delegate_to: localhost
+  become: false
+  changed_when: rw_node_patched is not skipped
+  when: cdn_inbound_tag not in rw_node_active_tags
+
+- name: Пауза на перезапуск xray после пуша
+  ansible.builtin.pause:
+    seconds: 20
+  when: rw_node_patched is not skipped
+
+- name: 'ПРОВЕРКА: инбаунд активен на ноде'
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes/{{ cdn_node_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_node_after
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  until: cdn_inbound_tag in (rw_node_after.json.response.configProfile.activeInbounds | map(attribute='tag') | list)
+  retries: 6
+  delay: 10

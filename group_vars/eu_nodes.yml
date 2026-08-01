@@ -1,0 +1,6 @@
+---
+# Настройки нод, участвующих в CDN-схеме (группа cdn_pool).
+# Нода попадает сюда только если :80 и :443 свободны от xray —
+# на EE-1 :443 занят reality-инбаундом моста, nginx там уходит в restart loop.
+cdn_provider: vk
+cdn_inbound_tag: CDNVK

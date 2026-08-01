@@ -1,0 +1,259 @@
+---
+# Раскатка origin-декоя под CDN-фронт: сайт-прикрытие, nginx, LE-сертификат.
+# Вход: primary_domain, cdn_domain, cdn_tunnel_path, cdn_site_variant
+# Порт бэкенда сайта определяется из его package.json.
+
+- name: Проверка входных параметров
+  ansible.builtin.assert:
+    that:
+      - primary_domain is defined and primary_domain | length > 0
+      - cdn_domain is defined and cdn_domain | length > 0
+      - cdn_tunnel_path is defined and cdn_tunnel_path.startswith('/')
+    fail_msg: "Нужны primary_domain, cdn_domain и cdn_tunnel_path"
+
+- name: Проверка семейства ОС
+  ansible.builtin.assert:
+    that: ansible_facts.os_family == 'Debian'
+    fail_msg: "Роль поддерживает только Debian и Ubuntu"
+
+# Преконтроль: на EE-1 :443 занят reality-инбаундом моста, nginx там уходил в restart loop.
+- name: Проверка занятости портов 80 и 443
+  ansible.builtin.shell: |
+    set -o pipefail
+    ss -lntp | grep -E ':(80|443) ' | grep -v docker-proxy | grep -v nginx || true
+  args:
+    executable: /bin/bash
+  register: xo_ports
+  changed_when: false
+
+- name: Остановка при занятых портах
+  ansible.builtin.assert:
+    that: xo_ports.stdout | trim | length == 0
+    fail_msg: |
+      На {{ inventory_hostname }} порты 80/443 заняты не-nginx процессом — origin здесь не поднять:
+      {{ xo_ports.stdout }}
+
+- name: Создание каталогов
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ stack_dir }}"
+    - "{{ stack_dir }}/conf.d"
+    - "{{ site_root }}"
+    - "{{ letsencrypt_dir }}"
+    - "{{ letsencrypt_dir }}/lib"
+
+- name: Клонирование репозитория сайтов-прикрытий
+  ansible.builtin.git:
+    repo: "{{ site_repo }}"
+    dest: "{{ site_repo_dir }}"
+    version: "{{ site_repo_version }}"
+    depth: 1
+    force: false
+
+# Вариант сайта выбирается случайно, а не по индексу ноды в группе:
+# индекс плывёт при любой правке инвентаря и ноды начинают делить одну витрину.
+- name: Выбор варианта сайта-прикрытия
+  ansible.builtin.set_fact:
+    cdn_site_variant: "{{ cdn_site_variant | default(available_site_variants | random, true) }}"
+
+- name: Проверка наличия выбранного сайта
+  ansible.builtin.stat:
+    path: "{{ site_repo_dir }}/{{ cdn_site_variant }}/index.html"
+  register: xo_site
+
+- name: Остановка при отсутствии варианта сайта
+  ansible.builtin.assert:
+    that: xo_site.stat.exists
+    fail_msg: "В репозитории нет варианта {{ cdn_site_variant }}"
+
+- name: Копирование сайта в корень nginx
+  ansible.builtin.copy:
+    src: "{{ site_repo_dir }}/{{ cdn_site_variant }}/"
+    dest: "{{ site_root }}/"
+    remote_src: true
+    mode: preserve
+  notify:
+    - Перезапуск backend сайта
+    - Перезапуск nginx
+
+- name: Чтение package.json сайта
+  ansible.builtin.slurp:
+    src: "{{ site_root }}/package.json"
+  register: xo_pkg
+
+- name: Определение порта backend сайта
+  ansible.builtin.set_fact:
+    site_backend_port: "{{ ((xo_pkg.content | b64decode | from_json).appPort | default(3000)) | int }}"
+
+- name: Установка сборочных пакетов
+  ansible.builtin.apt:
+    name: [build-essential, python3, curl, ca-certificates, gnupg]
+    state: present
+    update_cache: true
+
+# Сайт-декой требует Node >= 18 (express@5, better-sqlite3). В старых дистрибутивах
+# apt отдаёт node 12 — npm install падает. Проверено на SW-2 (Ubuntu 22.04, node v12.22.9).
+- name: Определение версии Node.js
+  ansible.builtin.command: node --version
+  register: xo_node_ver
+  changed_when: false
+  failed_when: false
+
+- name: Версия Node.js
+  ansible.builtin.set_fact:
+    xo_node_major: "{{ (xo_node_ver.stdout | default('v0') | regex_replace('^v([0-9]+).*$', '\\1') | int) if xo_node_ver.rc == 0 else 0 }}"
+
+# Сносить надо не только nodejs/npm, но и libnode*-пакеты: libnode-dev владеет
+# /usr/include/node/common.gypi и роняет установку NodeSource с
+# "trying to overwrite ... which is also in package libnode-dev" (SW-2, Ubuntu 22.04).
+- name: Удаление устаревшего Node.js вместе с libnode*
+  ansible.builtin.shell: |
+    set -o pipefail
+    pkgs=$(dpkg -l | awk '/^ii/ {print $2}' | grep -E '^(nodejs|npm|nodejs-doc|libnode-dev|libnode[0-9]+)$' || true)
+    if [ -n "$pkgs" ]; then
+      DEBIAN_FRONTEND=noninteractive apt-get purge -y $pkgs
+    fi
+  args:
+    executable: /bin/bash
+  register: xo_node_purge
+  changed_when: "'Removing' in (xo_node_purge.stdout | default(''))"
+  when: xo_node_major | int < 18
+
+- name: Подключение репозитория NodeSource и установка Node.js 22
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y nodejs
+  args:
+    executable: /bin/bash
+  register: xo_node_install
+  changed_when: true
+  when: xo_node_major | int < 18
+
+- name: 'ПРОВЕРКА: Node.js достаточно свежий'
+  ansible.builtin.shell: |
+    set -o pipefail
+    node --version | sed 's/^v//' | cut -d. -f1
+  args:
+    executable: /bin/bash
+  register: xo_node_final
+  changed_when: false
+  failed_when: (xo_node_final.stdout | int) < 18
+
+- name: Установка зависимостей сайта
+  ansible.builtin.command:
+    cmd: npm install --omit=dev --no-audit --no-fund
+    chdir: "{{ site_root }}"
+    creates: "{{ site_root }}/node_modules/express/package.json"
+  notify: Перезапуск backend сайта
+
+- name: Установка systemd-службы backend сайта
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/xhttp-site-backend.service.j2"
+    dest: /etc/systemd/system/xhttp-site-backend.service
+    mode: '0644'
+  notify: Перезапуск backend сайта
+
+- name: Запуск backend сайта
+  ansible.builtin.systemd:
+    name: xhttp-site-backend.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Генерация docker-compose
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/docker-compose.yml.j2"
+    dest: "{{ stack_dir }}/docker-compose.yml"
+    mode: '0644'
+  notify: Перезапуск nginx
+
+- name: Генерация HTTP-конфигурации nginx
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/live-http.conf.j2"
+    dest: "{{ stack_dir }}/conf.d/live-http.conf"
+    mode: '0644'
+  notify: Перезапуск nginx
+
+- name: Проверка наличия сертификата
+  ansible.builtin.stat:
+    path: "{{ letsencrypt_dir }}/live/{{ primary_domain }}/fullchain.pem"
+  register: xo_cert
+
+# Порядок обязателен: :80 ACME -> certbot -> :443. Иначе nginx не стартует без серта.
+- name: Удаление HTTPS-конфигурации перед первичным выпуском
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/conf.d/live-https.conf"
+    state: absent
+  when: not xo_cert.stat.exists
+
+- name: Запуск nginx на :80 для ACME
+  ansible.builtin.command:
+    cmd: docker compose up -d nginx
+    chdir: "{{ stack_dir }}"
+  changed_when: true
+  when: not xo_cert.stat.exists
+
+- name: Выпуск сертификата Let's Encrypt через webroot
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --profile certbot run --rm certbot certonly --webroot
+      --webroot-path /var/www/{{ primary_domain }}
+      --email {{ certbot_email }} --agree-tos --no-eff-email --non-interactive
+      --cert-name {{ primary_domain }} -d {{ primary_domain }}
+    chdir: "{{ stack_dir }}"
+  changed_when: true
+  when: not xo_cert.stat.exists
+
+- name: Генерация HTTPS-конфигурации nginx
+  ansible.builtin.template:
+    src: live-https.conf.j2
+    dest: "{{ stack_dir }}/conf.d/live-https.conf"
+    mode: '0644'
+  notify: Перезапуск nginx
+
+- name: Запуск nginx с HTTPS
+  ansible.builtin.command:
+    cmd: docker compose up -d nginx
+    chdir: "{{ stack_dir }}"
+  changed_when: true
+
+- name: Установка скрипта продления сертификата
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/renew-certificates.sh.j2"
+    dest: /usr/local/sbin/xhttp-renew-certificates
+    mode: '0750'
+
+- name: Установка службы и таймера продления
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    mode: '0644'
+  loop:
+    - { src: 'xhttp-certbot-renew.service.j2', dest: 'xhttp-certbot-renew.service' }
+    - { src: 'xhttp-certbot-renew.timer.j2', dest: 'xhttp-certbot-renew.timer' }
+
+- name: Включение таймера продления
+  ansible.builtin.systemd:
+    name: xhttp-certbot-renew.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Применение отложенных перезапусков
+  ansible.builtin.meta: flush_handlers
+
+- name: 'ПРОВЕРКА: origin отвечает 200 по HTTPS'
+  ansible.builtin.uri:
+    url: "https://{{ primary_domain }}/"
+    validate_certs: true
+    return_content: false
+  register: xo_check
+  retries: 6
+  delay: 10
+  until: xo_check.status == 200
+  delegate_to: localhost
+  become: false

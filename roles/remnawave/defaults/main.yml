@@ -1,0 +1,23 @@
+---
+# Доступ к панели. Токен — в playbook/secrets/remnawave_token (gitignored).
+remnawave_base_url: "https://panel.wowsecure.ru"
+remnawave_token_file: "{{ playbook_dir }}/secrets/remnawave_token"
+
+# Балансер, за которым живёт плитка WOW24.
+remnawave_balancer_template_uuid: "def77261-ec2c-4154-80b7-f215803b78ba"
+
+# Как новый хост попадает в балансер:
+#   uuids    — UUID хоста явно дописывается в injectHosts (мёртвые UUID вычищаются)
+#   tagRegex — селектор по тегу, список UUID не ведётся вообще
+remnawave_balancer_selector_mode: "uuids"
+remnawave_balancer_tag_pattern: "^CDN_POOL$"
+remnawave_balancer_tag_prefix: "proxy"
+
+# Каким тегом метим хосты CDN-пула.
+remnawave_cdn_host_tag: "CDN_POOL"
+
+# Параметры создаваемого хоста.
+remnawave_host_alpn: "h2,http/1.1"
+remnawave_host_fingerprint: "firefox"
+remnawave_host_security_layer: "TLS"
+remnawave_host_hidden: true

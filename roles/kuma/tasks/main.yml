@@ -1,0 +1,35 @@
+---
+- name: Проверка входных параметров мониторинга
+  ansible.builtin.assert:
+    that: cdn_front_domain_monitor is defined and cdn_front_domain_monitor | length > 0
+    fail_msg: "Нужен cdn_front_domain_monitor — домен фронта, который ставим на мониторинг"
+
+- name: Постановка фронта на мониторинг в Uptime Kuma
+  ansible.builtin.command:
+    argv:
+      - "{{ kuma_venv_python }}"
+      - "{{ kuma_cli }}"
+      - upsert
+      - --name
+      - "{{ kuma_monitor_name }}"
+      - --url
+      - "https://{{ cdn_front_domain_monitor }}/"
+      - --parent
+      - "{{ kuma_parent_group }}"
+      - --interval
+      - "{{ kuma_interval }}"
+      - --retries
+      - "{{ kuma_retries }}"
+      - --env
+      - "{{ kuma_env_file }}"
+  register: kuma_res
+  delegate_to: localhost
+  become: false
+  changed_when: (kuma_res.stdout | from_json).changed | default(false)
+
+- name: Результат постановки на мониторинг
+  ansible.builtin.debug:
+    msg: >-
+      Kuma: монитор "{{ kuma_monitor_name }}" id={{ (kuma_res.stdout | from_json).id }}
+      -> https://{{ cdn_front_domain_monitor }}/
+      ({{ 'обновлён' if (kuma_res.stdout | from_json).changed else 'уже был настроен' }})

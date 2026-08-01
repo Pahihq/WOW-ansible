@@ -1,0 +1,38 @@
+---
+# Читает состояние текущей ротации ноды. Отсутствие файла — не ошибка.
+- name: Каталог состояния
+  ansible.builtin.file:
+    path: "{{ cdn_state_dir }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+
+- name: Проверка файла состояния
+  ansible.builtin.stat:
+    path: "{{ cdn_state_file }}"
+  register: cdn_state_stat
+  delegate_to: localhost
+  become: false
+
+- name: Чтение файла состояния
+  ansible.builtin.slurp:
+    src: "{{ cdn_state_file }}"
+  register: cdn_state_raw
+  delegate_to: localhost
+  become: false
+  when: cdn_state_stat.stat.exists
+
+- name: Разбор состояния
+  ansible.builtin.set_fact:
+    cdn_state: >-
+      {{ (cdn_state_raw.content | b64decode | from_json)
+         if cdn_state_stat.stat.exists else {} }}
+
+- name: Текущее состояние ноды
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ 'состояния нет, ротация с нуля' if not cdn_state
+      else 'статус=' ~ (cdn_state.status | default('?')) ~
+           ' фронт=' ~ (cdn_state.front_domain | default('-')) ~
+           ' начата=' ~ (cdn_state.started_at | default('-')) }}
