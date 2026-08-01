@@ -1,108 +1,192 @@
 # WOW Ansible
 
-Набор Ansible playbook для управления Debian/Ubuntu-серверами: подготовка системы, RemnaNode, UFW, мониторинг, отчётность, диагностика и xHTTP/nginx-ноды.
+Ansible-репозиторий для эксплуатации Debian/Ubuntu-инфраструктуры WOW: базовая
+подготовка серверов, RemnaNode, UFW, мониторинг и отчётность, а также жизненный
+цикл CDN/xHTTP-фронтов. Последний контур управляет origin-декоями, DNS в
+Cloudflare, ресурсами VK Cloud CDN, Remnawave и мониторами Uptime Kuma.
+
+> Репозиторий выполняет изменения на production-хостах и во внешних API.
+> Сначала запускайте сценарий на одной ноде через `--limit`, а разрушительные
+> операции — только после предпросмотра.
+
+## Содержание
+
+- [Что здесь есть](#что-здесь-есть)
+- [Быстрый старт](#быстрый-старт)
+- [Инвентарь и группы](#инвентарь-и-группы)
+- [Секреты и локальные файлы](#секреты-и-локальные-файлы)
+- [Основные playbook](#основные-playbook)
+- [Контур CDN и xHTTP](#контур-cdn-и-xhttp)
+- [Проверки и CI](#проверки-и-ci)
+- [Эксплуатация и безопасность](#эксплуатация-и-безопасность)
+
+## Что здесь есть
+
+| Область | Компоненты | Назначение |
+| --- | --- | --- |
+| База | `bootstrap.yml` | Обновление Debian/Ubuntu, общие пакеты, Docker Engine/Compose, swap, sysctl, zsh и SSH-настройки. |
+| VPN-ноды | `remnanode.yml`, `update_remnanode.yml`, `ufw.yml` | Развёртывание и обновление RemnaNode, настройка безопасного UFW. |
+| Наблюдаемость | `monitoring.yml`, `reporting.yml`, `multitest.yml` | cAdvisor, node_exporter, vmagent, speedtest-метрики, Google Sheets и нагрузочные отчёты. |
+| CDN-пул | `profile_inbounds_sync.yml`, `rotate_cdn.yml`, `panel_sync.yml`, `kuma_sync.yml` | Инбаунды CDN, ротация фронтов, Remnawave-балансер и Uptime Kuma. |
+| Восстановление | `rotate_cleanup.yml`, `find_orphans.py`, `cdn_watchdog.py` | Чистка незавершённых ротаций, поиск сирот и осторожная авторотация при HTTP 451. |
+| Служебное | `test_domain.yml`, `squads_grant_slots.yml`, `tg_*.yml` | Проверка генерации доменов, выдача слотов сквадам, Telegram-диагностика. |
 
 ## Быстрый старт
 
-На управляющей машине нужны Ansible, Python 3 и SSH-доступ к серверам от пользователя с `sudo` (в примере — `root`). Подготовьте рабочие файлы:
+На управляющей машине требуются Python 3, Ansible, SSH-доступ и права `sudo`
+на целевых хостах. Для CDN-операций также нужны `curl`, `jq`, `bash` и Python
+зависимости локальных скриптов.
 
 ```bash
-cd /home/user/Documents/WOW-ansible
+git clone <repository-url> WOW-ansible
+cd WOW-ansible
+
+python3 -m pip install --user ansible-core ansible-lint
+ansible-galaxy collection install -r requirements.yml
+
 cp inventory.yml.example inventory.yml
 cp group_vars/docker_nodes.yml.example group_vars/docker_nodes.yml
-mkdir -p logs reports/multitest
+mkdir -p logs reports/multitest playbook/secrets
+
+ansible all -m ping
+ansible-playbook playbook/bootstrap.yml --syntax-check
 ```
 
-`inventory.yml` и `group_vars/docker_nodes.yml` содержат инфраструктурные данные и не должны попадать в Git. Перед запуском проверьте подключение:
+Конфигурация Ansible находится в `ansible.cfg`: по умолчанию используется
+`inventory.yml`, роли загружаются из `roles/`, журнал пишется в `logs/ansible.log`.
+Локальные inventory, секреты, отчёты, логи и состояние CDN исключены из Git.
+
+Для проверки одной ноды добавляйте `--limit`:
 
 ```bash
-ansible all -m ping
+ansible-playbook playbook/ufw.yml --limit node_pl1 --check --diff
 ```
 
-Все команды ниже запускаются из корня репозитория и используют стандартный `inventory.yml` из `ansible.cfg`. Для одной ноды добавляйте `--limit <inventory_hostname>`.
+`--check` не заменяет реальный запуск для задач, которые работают с Docker,
+выпускают TLS-сертификаты, обращаются к API или используют `command`/`shell`.
 
-## Inventory и группы
+## Инвентарь и группы
 
-| Группа | Назначение | Основные переменные хоста |
-| --- | --- | --- |
-| `docker_panel` | Панели и вспомогательные Docker-хосты | `ansible_host`, `ansible_user`, `monitoring_instance_name` |
-| `docker_nodes` | VPN-ноды с RemnaNode | `monitoring_instance_name`, `remnanode_profile`, `domain`, `speedtest_provider` |
-| `ru_nodes` | Подмножество VPN-нод с RU UFW-профилем | ссылка на хост из `docker_nodes` |
-| `eu_nodes` | Подмножество европейских VPN-нод | ссылка на хост из `docker_nodes` |
-| `xhttp_nodes` | Ноды с отдельным nginx/xHTTP cover-сайтом | `domain: primary, cdn` |
+Создайте `inventory.yml` из `inventory.yml.example`. В репозитории используются
+следующие группы:
 
-Пример xHTTP-ноды:
+| Группа | Для чего используется |
+| --- | --- |
+| `docker_panel` | Панели и вспомогательные Docker-хосты. |
+| `docker_nodes` | VPN-ноды RemnaNode; к ним применяются RemnaNode и UFW. |
+| `ru_nodes` | Подмножество VPN-нод с RU-профилем firewall. |
+| `eu_nodes` | Ноды CDN-пула; на них работают ротация CDN и xHTTP-origin. |
+| `xhttp_nodes` | Зарезервированная группа в тестовом inventory; сам `xhttp_nginx.yml` запускается по `eu_nodes`. |
+
+Минимальный пример узла:
 
 ```yaml
-xhttp_nodes:
+docker_nodes:
   hosts:
-    node_usa2:
-      ansible_host: 92.118.112.150
+    node_pl1:
+      ansible_host: 203.0.113.21
       ansible_user: root
-      monitoring_instance_name: node_usa2
-      domain: arch.wowsecure.ru, edge.wowsecure.ru
+      monitoring_instance_name: node_pl1
+      remnanode_profile: plain
+      speedtest_provider: ookla
+      domain: origin.example.com, front.example.com
+      ufw_client_ports_override:
+        - 1080
+
+eu_nodes:
+  hosts:
+    node_pl1:
 ```
 
-Для `xhttp_nodes` первое имя в `domain` — основной домен и имя каталога сертификата Let's Encrypt; второе — CDN-домен. У каждой xHTTP-ноды должна быть уникальная пара доменов.
+`monitoring_instance_name` — имя ноды в метриках; если его нет, используется
+`inventory_hostname`. Для `xhttp_nginx.yml` и CDN-пула `domain` должен содержать
+ровно два уникальных значения через запятую: сначала origin, затем CDN-фронт.
+До выпуска сертификата origin-домен должен резолвиться на ноду, а `80` и `443`
+должны быть свободны и доступны извне.
 
 ## Секреты и локальные файлы
 
-Не храните секреты в inventory или Git. Перед связанными сценариями создайте локальные файлы:
+Все пути ниже намеренно находятся в игнорируемом `playbook/secrets/`. Не
+добавляйте ключи, токены, inventory или файлы состояния в коммиты.
 
-| Сценарий | Локальный файл | Содержимое |
+| Интеграция | Файл / источник | Обязательные значения |
 | --- | --- | --- |
-| RemnaNode | `playbook/secrets/remnanode_secret_key` | ключ ноды Remnawave |
-| Мониторинг | `playbook/secrets/vmagent.yml` | `vmagent_remote_write_url`, `vmagent_remote_write_username`, `vmagent_remote_write_password` |
-| Отчётность | `playbook/secrets/google_sheet_id` | ID Google Sheets, одна строка |
-| Отчётность | `playbook/secrets/google_credentials.json` | JSON service account Google |
-| VK Cloud CDN | `playbook/scripts/.env` | OpenStack/VK Cloud и Cloudflare credentials |
+| RemnaNode | `remnanode_secret_key` | Секретный ключ ноды Remnawave. |
+| Remnawave API | `remnawave_token` | Bearer-токен панели для синхронизации CDN-пула. |
+| vmagent | `vmagent.yml` | `vmagent_remote_write_url`, `vmagent_remote_write_username`, `vmagent_remote_write_password`. |
+| Google Sheets | `google_sheet_id`, `google_credentials.json` | ID таблицы и JSON service account. Переменные окружения `GOOGLE_SHEET_ID` и `GOOGLE_CREDENTIALS_FILE` могут заменить файлы. |
+| Cloudflare + VK Cloud | `.env` | Скопируйте `playbook/scripts/.env.example`; потребуются OpenStack/VK Cloud и Cloudflare account token с Zone Read/DNS Write. |
+| Uptime Kuma | `kuma.env` | `KUMA_URL`, `KUMA_USER`, `KUMA_PASS`. |
+| Telegram | `telegram.env` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`; опционально `TELEGRAM_THREAD_ID`. |
 
-Для отправки отчётов в Google Sheets на управляющей машине также требуются пакеты Python:
+Подготовка CDN-credentials:
+
+```bash
+cp playbook/scripts/.env.example playbook/secrets/.env
+chmod 600 playbook/secrets/.env
+```
+
+В `group_vars/xhttp_nodes.yml` по умолчанию уже указан именно путь
+`playbook/secrets/.env`. Не сохраняйте OpenStack RC-файлы рядом с репозиторием
+без необходимости: `*openrc.sh` также игнорируется Git.
+
+Для отчётности в Google Sheets на управляющей машине потребуются библиотеки:
 
 ```bash
 python3 -m pip install --user google-api-python-client google-auth
 ```
 
-## Playbook
-
-### Полная настройка
-
-```bash
-ansible-playbook playbook/site.yml
-```
-
-`site.yml` запускает последовательность: `bootstrap.yml` → `remnanode.yml` → `ufw.yml` → `monitoring.yml` → `reporting.yml`. Используйте его только после подготовки всех перечисленных секретов и переменных.
-
-### Базовая подготовка хостов
+Для Uptime Kuma создайте виртуальное окружение, которое по умолчанию ожидает
+роль `kuma`:
 
 ```bash
-ansible-playbook playbook/bootstrap.yml
+python3 -m venv .venv
+.venv/bin/pip install 'python-socketio[client]'
 ```
 
-Работает на всех хостах: обновляет Debian/Ubuntu без перезагрузки, устанавливает общие пакеты, настраивает локаль `en_US.UTF-8`, устанавливает Docker Engine и Docker Compose v2 из официального репозитория Docker. Если требуется reboot, playbook только сообщит об этом.
+## Основные playbook
+
+Все команды выполняются из корня репозитория.
+
+| Playbook | Цели | Что делает | Пример запуска |
+| --- | --- | --- | --- |
+| `bootstrap.yml` | `all` | Базовая подготовка ОС и Docker. Не перезагружает сервер, но сообщает о необходимости reboot. | `ansible-playbook playbook/bootstrap.yml --limit node_pl1` |
+| `remnanode.yml` | `docker_nodes` | Устанавливает RemnaNode в `/opt/remnanode`. Профили: `plain` и `trojan_grpc`. | `ansible-playbook playbook/remnanode.yml --limit docker_nodes` |
+| `ufw.yml` | `docker_nodes` | Настраивает SSH, клиентские порты и доступ панели к `NODE_PORT`; включает `deny incoming`. | `ansible-playbook playbook/ufw.yml --limit node_pl1` |
+| `monitoring.yml` | `all` | Разворачивает cAdvisor, node_exporter, vmagent и timer speedtest. | `ansible-playbook playbook/monitoring.yml --limit node_pl1` |
+| `reporting.yml` | `all` | Собирает инвентарь и speedtest в Google Sheets; вкладка по умолчанию `ansible_inventory`. | `ansible-playbook playbook/reporting.yml` |
+| `update_remnanode.yml` | `docker_nodes` | Последовательно обновляет Compose-образы. По умолчанию партия — 3 ноды. | `ansible-playbook playbook/update_remnanode.yml -e batch_size=1` |
+| `multitest.yml` | `docker_nodes` | Нагрузочный тест строго по одной ноде; копирует отчёты в `reports/multitest/`. | `ansible-playbook playbook/multitest.yml --limit node_pl1` |
+| `site.yml` | `all` | Полный конвейер: bootstrap → RemnaNode → UFW → monitoring → reporting. | `ansible-playbook playbook/site.yml` |
 
 ### RemnaNode
 
-```bash
-ansible-playbook playbook/remnanode.yml --limit docker_nodes
-```
-
-Профиль задаётся на хосте в inventory:
+В inventory выберите профиль:
 
 ```yaml
-remnanode_profile: plain        # стандартный Remnawave Node
-remnanode_profile: trojan_grpc  # RemnaNode + nginx, TLS и Trojan gRPC
+remnanode_profile: plain
+# или
+remnanode_profile: trojan_grpc
 ```
 
-Для `trojan_grpc` обязательны `domain`, файл `playbook/secrets/remnanode_secret_key` и архив `playbook/files/site.zip`. Playbook сохраняет стек в `/opt/remnanode`, загружает `zapret.dat` и запускает Compose.
-
-### Firewall UFW
+`trojan_grpc` дополнительно требует домен, файл
+`playbook/secrets/remnanode_secret_key` и архив `playbook/files/site.zip`.
+Обновление без удаления неиспользуемых Docker-образов:
 
 ```bash
-ansible-playbook playbook/ufw.yml --limit docker_nodes
+ansible-playbook playbook/update_remnanode.yml --limit docker_nodes
 ```
 
-Перед первым запуском укажите реальные адреса панелей Remnawave в `group_vars/docker_nodes.yml`:
+Удалять неиспользуемые образы разрешено только явным флагом:
+
+```bash
+ansible-playbook playbook/update_remnanode.yml -e prune_images=true
+```
+
+### UFW
+
+Перед первым запуском укажите реальные IP панелей в локальном
+`group_vars/docker_nodes.yml`:
 
 ```yaml
 ufw_panel_ips:
@@ -110,82 +194,136 @@ ufw_panel_ips:
   - "198.51.100.11"
 ```
 
-Роль определяет SSH и `NODE_PORT`, открывает SSH и клиентские порты, разрешает `NODE_PORT` только с IP панелей, включает `default deny incoming`. Дополнительные клиентские порты задаются на хосте через `ufw_client_ports_override`; для `ru_nodes` применяется отдельный профиль.
+Роль находит SSH-порты и `NODE_PORT` из Compose, открывает клиентские порты,
+а API-ноды разрешает только адресам панелей. При первом боевом запуске оставьте
+открытым активный SSH-сеанс, используйте одну ноду и убедитесь, что адрес
+управляющей панели указан верно.
 
-### Мониторинг
+## Контур CDN и xHTTP
 
-```bash
-ansible-playbook playbook/monitoring.yml
-```
+Этот набор сценариев связывает состояние в `playbook/state/<node>.json` с DNS,
+VK Cloud, Remnawave и Kuma. Состояние хранится на управляющей машине, имеет
+права `0600` и не коммитится. Не удаляйте его во время активной ротации.
 
-Устанавливает и включает cAdvisor, node_exporter, vmagent и systemd timer для метрик speedtest. Каталоги: `/opt/monitoring` и `/var/lib/node_exporter/textfile_collector`. Значение `monitoring_instance_name` используется как имя хоста; если оно не задано, берётся `inventory_hostname`. `speedtest_provider: yandex` переключает сбор speedtest на Яндекс, иначе используется Ookla.
+### Первичная подготовка
 
-### Отчётность в Google Sheets
+1. Настройте `eu_nodes`, пары доменов и локальные secrets.
+2. Разверните origin/xHTTP-сайты:
 
-```bash
-ansible-playbook playbook/reporting.yml
-```
+   ```bash
+   ansible-playbook playbook/xhttp_nginx.yml --limit node_pl1
+   ```
 
-Собирает публичный IP, ОС, ядро, CPU, память, размер root-раздела и результаты speedtest, затем отправляет строки в Google Sheets. По умолчанию вкладка называется `ansible_inventory`; её можно изменить переменной окружения `GOOGLE_SHEET_TAB`. Вместо файлов допускаются `GOOGLE_SHEET_ID` и `GOOGLE_CREDENTIALS_FILE` в окружении.
+   Playbook выбирает статический cover-сайт детерминированно, настраивает nginx
+   в `/opt/remnanode/nginx`, получает Let's Encrypt сертификат и после успеха
+   локально запускает `scripts/setup-cdn.sh`. Если CDN временно не требуется,
+   передайте `-e xhttp_cdn_setup_enabled=false`.
 
-### Обновление RemnaNode
+3. Создайте CDN-инбаунды в конфиг-профиле Remnawave. Этот шаг может перезапустить
+   Xray на всех нодах профиля, поэтому сначала используйте предпросмотр, затем
+   окно низкой нагрузки:
 
-```bash
-ansible-playbook playbook/update_remnanode.yml --limit docker_nodes
-```
+   ```bash
+   ansible-playbook playbook/profile_inbounds_sync.yml
+   ansible-playbook playbook/profile_inbounds_sync.yml -e apply=true
+   ```
 
-Обновляет Compose-образы последовательно, по умолчанию пачками до трёх хостов, ждёт 15 секунд и показывает состояние сервисов. Неиспользуемые Docker-образы удаляются только с `-e prune_images=true`.
+4. Выдайте новые `CDN_Pxx` внутренним сквадам, иначе пользователи не получат
+   хосты в подписке:
 
-### Multitest
+   ```bash
+   ansible-playbook playbook/squads_grant_slots.yml
+   ansible-playbook playbook/squads_grant_slots.yml -e apply=true
+   ```
 
-```bash
-ansible-playbook playbook/multitest.yml --limit docker_nodes
-```
+### Ротация и синхронизация
 
-Запускает нагрузочный Multitest строго по одной ноде за раз. Отчёт остаётся на сервере в `/var/log/multitest/<host>.txt` и копируется на управляющую машину в `reports/multitest/<host>.txt`.
+| Сценарий | Безопасный запуск | Применение / результат |
+| --- | --- | --- |
+| Проверить генератор доменов | `ansible-playbook playbook/test_domain.yml` | Ничего внешнего не создаёт (`cdn_dry_run=true`). |
+| Ротировать один CDN-фронт | `ansible-playbook playbook/rotate_cdn.yml --limit node_pl1 -e cdn_dry_run=true` | Уберите `cdn_dry_run=true` для создания DNS, origin, ресурса CDN, хоста и балансера. |
+| Продолжить прерванную ротацию | — | `ansible-playbook playbook/rotate_cdn.yml --limit node_pl1 -e cdn_resume=true` |
+| Синхронизировать панель | — | `ansible-playbook playbook/panel_sync.yml --limit node_pl1` создаёт/чинит CDN-хост и балансер по state-файлу. |
+| Синхронизировать Kuma | — | `ansible-playbook playbook/kuma_sync.yml --limit node_pl1` переносит монитор на актуальный фронт. |
+| Очистить брошенную ротацию | `ansible-playbook playbook/rotate_cleanup.yml --limit node_pl1` | Добавьте `-e apply=true` только после проверки списка удаляемых DNS/VK-ресурсов/каталога сайта. |
 
-### xHTTP/nginx cover-ноды
+При ручной `rotate_cdn.yml` предыдущее плечо по умолчанию остаётся включённым.
+Для авторотации `cdn_watchdog.py` устанавливает `auto_trigger=true`, и прежнее
+плечо снимается автоматически по завершении.
 
-```bash
-ansible-playbook playbook/xhttp_nginx.yml --limit xhttp_nodes
-```
+### Kuma, Telegram и watchdog
 
-Этот playbook не устанавливает Docker, Docker Compose или Git: они должны быть на ноде заранее. Он выбирает разные статические витрины из `Pahihq/xhttp-selfsteal` автоматически по порядку нод в группе, получает сертификат Let's Encrypt через webroot и настраивает продление дважды в сутки.
-
-После успешного развёртывания ноды playbook локально запускает
-`playbook/scripts/setup-cdn.sh`. Первый домен из inventory передаётся как origin,
-второй — как CDN-домен. Остальные параметры читаются только из локального
-`playbook/scripts/.env`; секреты на управляемую ноду не копируются. Вызовы для
-нескольких нод выполняются последовательно.
-
-Подготовьте `.env` перед запуском:
-
-```bash
-cp playbook/scripts/.env.example playbook/scripts/.env
-chmod 600 playbook/scripts/.env
-```
-
-В `.env` заполните OpenStack/VK Cloud и Cloudflare credentials. Скрипт ничего
-не запрашивает интерактивно. `CDN_DOMAIN` и `ORIGIN` вычисляются из
-`domain: primary, cdn` в inventory, протокол источника всегда `MATCH`, а CNAME
-и Let's Encrypt настраиваются автоматически. Чтобы временно отключить
-автоматическую настройку CDN, передайте `-e xhttp_cdn_setup_enabled=false`.
-
-Стек размещается в `/opt/remnanode/nginx`. Nginx использует `network_mode: host`, поэтому одновременно принимает внешние подключения на 80/443 и передаёт `/api/stream/room` в xray на `127.0.0.1:10085`. Перед запуском основной домен должен указывать на ноду для прохождения ACME-проверки, а порты 80 и 443 должны быть свободны и доступны извне. CNAME второго домена создаётся автоматически после развёртывания. E-mail Let's Encrypt задан в `group_vars/xhttp_nodes.yml`.
-
-## Проверки и безопасный запуск
-
-Проверка синтаксиса:
+`kuma_cli.py` — локальный CLI Uptime Kuma, использующий socket.io:
 
 ```bash
-ansible-playbook playbook/site.yml --syntax-check
-ansible-playbook playbook/xhttp_nginx.yml --syntax-check
+.venv/bin/python playbook/scripts/kuma_cli.py list
+.venv/bin/python playbook/scripts/kuma_cli.py status --parent 18 --prefix 'CDN '
+ansible-playbook playbook/tg_test.yml
 ```
 
-Предварительный просмотр изменений для большинства задач:
+`cdn_watchdog.py` реагирует именно на подтверждённый HTTP 451: нужны два
+последовательных срабатывания, действуют cooldown и дневной бюджет. Обычные
+SSL/timeout/5xx приводят к алерту, но не к ротации. Перед включением systemd
+таймера проверьте логику безопасно:
 
 ```bash
-ansible-playbook playbook/ufw.yml --check --diff --limit node_usa2
+python3 playbook/scripts/cdn_watchdog.py --dry-run --verbose
 ```
 
-`--check` не выполняет реальные операции, необходимые для выпуска сертификата Let's Encrypt, загрузки образов и некоторых shell/command-задач. Для UFW сначала используйте `--limit` на одной ноде и сохраняйте доступный SSH-сеанс до подтверждения правил.
+Стоп-кран авторотации — файл `playbook/state/AUTOROTATE_OFF`. Он отключает
+только watchdog; ручные запуски `rotate_cdn.yml` продолжат работать.
+
+Скрипты `cdn_watchdog.py` и `find_orphans.py` рассчитаны на развёрнутый
+контроллер в `/root/ansible`. Если репозиторий расположен в другом месте,
+перед их использованием скорректируйте константы путей в самих скриптах.
+`find_orphans.py` без аргументов только выводит сиротские A/CNAME; переданные
+ему домены удаляются из Cloudflare.
+
+## Проверки и CI
+
+Установите те же зависимости, что использует CI, и выполните:
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+ansible-lint
+
+find playbook -maxdepth 1 -type f -name '*.yml' -print0 | sort -z |
+  xargs -0 -n 1 ansible-playbook \
+    --inventory tests/inventory.yml \
+    --syntax-check
+```
+
+GitHub Actions в `.github/workflows/ansible-validate.yml` запускается на push
+и PR в `main`, не подключается к production inventory и не получает secrets.
+Проверка называется **Lint and syntax check** — её следует выбрать обязательной
+в GitHub Ruleset для `main` после первого успешного прогона.
+
+В `.ansible-lint` исторические style-замечания временно имеют уровень warning.
+Ошибки синтаксиса, схем, отсутствующих модулей и остальные неослабленные правила
+по-прежнему делают CI красным. Новые предупреждения стоит устранять постепенно,
+а не расширять список исключений без причины.
+
+## Эксплуатация и безопасность
+
+- Не запускайте `site.yml` до подготовки всех secrets: он включает отчётность
+  Google Sheets после настройки инфраструктуры.
+- Для UFW, обновлений, ротации CDN и cleanup всегда начинайте с одной ноды.
+- Не передавайте токены через `-e` или командную строку: они могут попасть в
+  shell history, process list или CI-логи.
+- Перед `rotate_cleanup.yml -e apply=true` сохраняйте вывод предпросмотра.
+- `playbook/state/`, `reports/`, `logs/` и резервные `*.bak.*` — локальные
+  эксплуатационные артефакты. Храните резервную копию state-файлов вне Git.
+- Скрипты в `failover_db/` относятся к ручным процедурам failover Remnawave DB;
+  сначала прочитайте `failover_db/remnawave-ha-cheatsheet.md` и не запускайте
+  их автоматически из Ansible.
+
+## Структура репозитория
+
+```text
+playbook/       Основные сценарии, шаблоны, файлы и локальные scripts
+roles/          Переиспользуемые роли: remnawave, cdn_domain, cdn_state, kuma,
+                telegram, ufw_firewall, xhttp_origin
+group_vars/     Общие настройки групп и локальные overrides
+tests/          Непроизводственный inventory для syntax check в CI
+failover_db/    Ручные инструкции и скрипты HA/failover базы Remnawave
+```
