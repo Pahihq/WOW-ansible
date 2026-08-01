@@ -1,0 +1,32 @@
+---
+# Non-production inventory used exclusively by CI syntax checks.
+# No workflow task is executed: ansible-playbook is invoked with --syntax-check.
+all:
+  vars:
+    ansible_connection: local
+    ansible_host: 127.0.0.1
+    ansible_user: ci
+  children:
+    docker_panel:
+      hosts:
+        ci_panel:
+          monitoring_instance_name: ci-panel
+    docker_nodes:
+      hosts:
+        ci_node:
+          monitoring_instance_name: ci-node
+          remnanode_profile: plain
+          domain: node.example.test
+          speedtest_provider: ookla
+          ufw_panel_ips:
+            - 192.0.2.10
+    eu_nodes:
+      hosts:
+        ci_node:
+          domain: node.example.test, cdn.example.test
+    ru_nodes:
+      hosts:
+        ci_node:
+    xhttp_nodes:
+      hosts:
+        ci_node:

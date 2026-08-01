@@ -551,7 +551,7 @@
       when: active_swaps.stdout | trim == ""
 
     - name: Убедитесь, что файл подкачки присутствует в fstab
-      ansible.builtin.mount:
+      ansible.posix.mount:
         name: none
         src: "{{ swap_file_path }}"
         fstype: swap

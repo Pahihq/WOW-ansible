@@ -1,0 +1,12 @@
+---
+# Transitional baseline: legacy style findings stay visible in CI, but do not
+# block merges. Syntax, schema, and module-resolution failures remain errors.
+warn_list:
+  - args
+  - command-instead-of-shell
+  - jinja
+  - name
+  - no-changed-when
+  - run-once
+  - var-naming
+  - yaml

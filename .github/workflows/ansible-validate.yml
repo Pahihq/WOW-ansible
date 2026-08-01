@@ -1,0 +1,45 @@
+name: Validate Ansible
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The workflow only reads the repository. It never receives deployment secrets
+# and never connects to inventory hosts.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint and syntax check
+    runs-on: ubuntu-latest
+    env:
+      # The repository config logs locally; CI has no logs/ directory to write to.
+      ANSIBLE_LOG_PATH: /dev/null
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Ansible tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ansible-core ansible-lint
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Lint playbooks and roles
+        run: ansible-lint
+
+      - name: Check syntax of every playbook
+        run: |
+          find playbook -maxdepth 1 -type f -name '*.yml' -print0 | sort -z |
+            xargs -0 -n 1 ansible-playbook \
+              --inventory tests/inventory.yml \
+              --syntax-check

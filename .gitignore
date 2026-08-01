@@ -1,6 +1,7 @@
 # Local inventory and overrides
 inventory.yml
 inventory.yaml
+!tests/inventory.yml
 host_vars/
 group_vars/docker_nodes.yml
 *.local.yml

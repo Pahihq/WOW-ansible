@@ -1,5 +1,6 @@
 ---
 galaxy_info:
+  author: WOW-ansible maintainers
   role_name: ufw_firewall
   description: >-
     Настройка UFW на VPN-нодах remnawave: открывает клиентские порты xray,
