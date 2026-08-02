@@ -1,0 +1,157 @@
+---
+# Снимает с нод инбаунды CDN_Pxx, оставшиеся от прошлых ротаций.
+#
+#   предпросмотр:  ansible-playbook playbook/node_inbounds_cleanup.yml
+#   боевой:        ansible-playbook playbook/node_inbounds_cleanup.yml -e apply=true
+#
+# ⚠️ Пуш конфигурации РЕСТАРТИТ xray на ноде — её живые клиенты переподключатся.
+#    Задевает только ноды, где действительно есть лишнее; остальные пропускаются.
+#
+# Зачем: до 2026-08-02 ротация включала новый инбаунд и не снимала прошлый, поэтому
+# на нодах копились слоты (SW-2 несла три). Сама ротация это уже чинит — плейбук нужен,
+# чтобы разобрать накопившийся хвост, не дожидаясь следующих ротаций.
+#
+# Снимается ТОЛЬКО то, что одновременно:
+#   · имеет тег вида CDN_Pxx — чужие инбаунды (CDN_beeline, CDNYandex_v2,
+#     CDN_BRIDGEVK_XHTTP, BRIDGE_IN, VLESS_*) не трогаются никогда;
+#   · не является текущим слотом ноды по её файлу состояния;
+#   · не используется ни одним ВКЛЮЧЁННЫМ хостом панели.
+- name: Чистка осиротевших инбаундов на нодах
+  hosts: eu_nodes
+  gather_facts: false
+  serial: 1
+  vars:
+    apply: false
+  roles:
+    - role: remnawave
+  tasks:
+    - name: Загрузка состояния ротации ноды
+      ansible.builtin.include_role:
+        name: cdn_state
+        tasks_from: load
+
+    - name: Пропуск нод без завершённой ротации
+      ansible.builtin.meta: end_host
+      when: >-
+        (cdn_state | default({}, true)) == {}
+        or (cdn_state.status | default('')) != 'active'
+
+    - name: Получение нод, инбаундов и хостов панели
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}{{ item }}"
+        headers: "{{ remnawave_headers }}"
+        return_content: true
+      register: nic_lookup
+      loop:
+        - /api/nodes/
+        - /api/config-profiles/inbounds
+        - /api/hosts/
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Сопоставление ноды инвентаря с нодой панели по IP
+      ansible.builtin.set_fact:
+        nic_node: >-
+          {{ (nic_lookup.results[0].json.response
+              | selectattr('address', 'equalto', cdn_state.node_ip) | list | first) }}
+        nic_live_tags: >-
+          {{ nic_lookup.results[2].json.response
+             | rejectattr('isDisabled')
+             | map(attribute='inbound.configProfileInboundUuid') | list }}
+
+    - name: Разбор активных инбаундов ноды
+      ansible.builtin.set_fact:
+        nic_active: "{{ nic_node.configProfile.activeInbounds }}"
+        nic_live_tag_names: >-
+          {{ nic_lookup.results[1].json.response.inbounds
+             | selectattr('uuid', 'in', nic_live_tags) | map(attribute='tag') | list }}
+
+    - name: Отбор лишних инбаундов
+      ansible.builtin.set_fact:
+        nic_stale: >-
+          {{ nic_active
+             | selectattr('tag', 'match', '^CDN_P[0-9]{2}$')
+             | rejectattr('tag', 'equalto', cdn_state.inbound_tag)
+             | rejectattr('tag', 'in', nic_live_tag_names) | list }}
+
+    - name: Что нашли
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} ({{ nic_node.name }}): активны
+          {{ nic_active | map(attribute='tag') | select('match', '^CDN_P') | join(', ') }}
+          · текущий слот {{ cdn_state.inbound_tag }}
+          · {{ ('ЛИШНИЕ: ' ~ (nic_stale | map(attribute='tag') | join(', '))) if nic_stale | length > 0 else 'лишнего нет' }}
+
+    - name: Пропуск ноды, на которой чистить нечего
+      ansible.builtin.meta: end_host
+      when: nic_stale | length == 0
+
+    - name: 'ПРОВЕРКА: текущий слот остаётся активным'
+      ansible.builtin.assert:
+        that:
+          - cdn_state.inbound_tag in (nic_active | map(attribute='tag') | list)
+          - cdn_state.inbound_tag not in (nic_stale | map(attribute='tag') | list)
+        fail_msg: >-
+          Отказ: текущий слот {{ cdn_state.inbound_tag }} ноды {{ inventory_hostname }}
+          либо не активен, либо попал в список на снятие
+
+    - name: Предпросмотр — что было бы сделано
+      ansible.builtin.debug:
+        msg: >-
+          БЕЗ ИЗМЕНЕНИЙ (нужен -e apply=true): с {{ nic_node.name }} сняли бы
+          {{ nic_stale | map(attribute='tag') | join(', ') }},
+          осталось бы {{ (nic_active | map(attribute='tag') | list)
+                          | difference(nic_stale | map(attribute='tag') | list) | join(', ') }}.
+          Это рестарт xray на ноде ({{ nic_node.usersOnline | default('?') }} онлайн).
+      when: not (apply | bool)
+
+    - name: Снятие лишних инбаундов
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}/api/nodes/"
+        method: PATCH
+        headers: "{{ remnawave_headers }}"
+        body_format: json
+        body:
+          uuid: "{{ nic_node.uuid }}"
+          configProfile:
+            activeConfigProfileUuid: "{{ nic_node.configProfile.activeConfigProfileUuid }}"
+            activeInbounds: >-
+              {{ (nic_active | map(attribute='uuid') | list)
+                 | difference(nic_stale | map(attribute='uuid') | list) }}
+        status_code: [200]
+        return_content: true
+      register: nic_patched
+      delegate_to: localhost
+      become: false
+      changed_when: nic_patched is not skipped
+      when: apply | bool
+
+    - name: Пауза на перезапуск xray
+      ansible.builtin.pause:
+        seconds: 20
+      when: apply | bool
+
+    - name: 'ПРОВЕРКА: лишнего больше нет, текущий слот на месте'
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}/api/nodes/{{ nic_node.uuid }}"
+        headers: "{{ remnawave_headers }}"
+        return_content: true
+      register: nic_after
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: >-
+        cdn_state.inbound_tag not in
+          (nic_after.json.response.configProfile.activeInbounds | map(attribute='tag') | list)
+        or ((nic_after.json.response.configProfile.activeInbounds | map(attribute='tag') | list)
+            | intersect(nic_stale | map(attribute='tag') | list) | length) > 0
+      when: apply | bool
+
+    - name: Итог по ноде
+      ansible.builtin.debug:
+        msg: >-
+          {{ nic_node.name }}: снято {{ nic_stale | map(attribute='tag') | join(', ') }},
+          активен {{ nic_after.json.response.configProfile.activeInbounds
+                     | map(attribute='tag') | select('match', '^CDN_P') | join(', ') }}
+      when: apply | bool

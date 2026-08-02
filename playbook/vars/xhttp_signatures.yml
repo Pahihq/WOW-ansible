@@ -241,6 +241,10 @@ xhttp_signatures:
 - slot: P07
   legend: streaming
   inbound_tag: CDN_P07
+  # ЗАРЕЗЕРВИРОВАН, аллокатору не выдавать: это зеркало легаси-инбаунда CDNVK —
+  # тот же path /api/stream/room. Выдача слота означала бы два инбаунда с одинаковым
+  # путём в профиле и повтор сигнатуры, уже светившейся на снятом фронте stream-leam.
+  reserved: true
   path: /api/stream/room
   mode: auto
   uplink_http_method: HEAD

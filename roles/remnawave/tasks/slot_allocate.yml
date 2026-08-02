@@ -28,12 +28,16 @@
     rw_all_hosts: "{{ rw_slot_lookup.results[0].json.response }}"
     rw_all_inbounds: "{{ rw_slot_lookup.results[1].json.response.inbounds }}"
 
+# Выключенный хост слот НЕ держит: он выведен из работы, и сигнатуру можно отдавать
+# заново. Без этого фильтра погашенные плечи держали P01-P04 намертво (2026-08-02),
+# и «30 слотов по кругу» превращались в одноразовые.
 - name: Определение инбаундов, занятых хостами CDN-пула
   ansible.builtin.set_fact:
     rw_busy_inbound_uuids: >-
       {{ rw_all_hosts
          | selectattr('tags', 'defined')
          | selectattr('tags', 'contains', remnawave_cdn_host_tag)
+         | rejectattr('isDisabled')
          | rejectattr('uuid', 'equalto', cdn_retire_host_uuid | default(''))
          | map(attribute='inbound.configProfileInboundUuid') | list }}
 
@@ -50,10 +54,15 @@
     rw_busy_slot_tags: >-
       {{ rw_busy_inbound_tags + (['CDN_P07'] if 'CDNVK' in rw_busy_inbound_tags else []) }}
 
+# Зарезервированные слоты (reserved: true) не выдаются никогда. Сейчас это P07 —
+# зеркало легаси-инбаунда CDNVK с тем же path. Правило «CDNVK занят -> P07 занят» ниже
+# работает, только пока CDNVK держит живой хост: 2026-08-02 хост выключили, связь
+# порвалась, и P07 ушёл в ротацию с уже засвеченным путём.
 - name: Список слотов, доступных для ротации
   ansible.builtin.set_fact:
     rw_free_slots: >-
       {{ xhttp_signatures
+         | selectattr('reserved', 'undefined')
          | rejectattr('inbound_tag', 'in', rw_busy_slot_tags)
          | selectattr('inbound_tag', 'in', (rw_all_inbounds | map(attribute='tag') | list))
          | list }}
@@ -66,17 +75,84 @@
       Либо заведи инбаунды CDN_Pxx в профиле (playbook/profile_inbounds_sync.yml),
       либо освободи слоты ретайром старых хостов.
 
+# Слоты ходят по кругу, но возвращать недавно сожжённую сигнатуру не стоит: путь
+# заблокированного фронта мог попасть под наблюдение. Журнал `тег -> когда выдан`
+# даёт настоящий LRU. Файлы состояния для этого не годятся — в них лежит только одно
+# поколение назад (prev), и слот двухдневной давности выглядит «не бывшим в обороте».
+- name: Проверка журнала выдачи слотов
+  ansible.builtin.stat:
+    path: "{{ rw_slot_ledger_file }}"
+  register: rw_ledger_stat
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Чтение журнала выдачи слотов
+  ansible.builtin.set_fact:
+    rw_slot_ledger: >-
+      {{ (lookup('ansible.builtin.file', rw_slot_ledger_file) | from_json)
+         if rw_ledger_stat.stat.exists else {} }}
+
+- name: Ранжирование свободных слотов по давности выдачи
+  ansible.builtin.set_fact:
+    rw_ranked_slots: >-
+      {{ (rw_ranked_slots | default([]))
+         + [{'tag': item.inbound_tag,
+             'last_used': rw_slot_ledger[item.inbound_tag] | default(0) | int}] }}
+  loop: "{{ rw_free_slots }}"
+  loop_control:
+    label: "{{ item.inbound_tag }}"
+
+# Ни разу не выдававшийся слот имеет 0 и всегда идёт первым; когда все 30 побывали
+# в обороте, берётся тот, что не выдавался дольше прочих.
 - name: Выбор слота
   ansible.builtin.set_fact:
-    cdn_slot: "{{ rw_free_slots | first }}"
+    cdn_slot: >-
+      {{ xhttp_signatures
+         | selectattr('inbound_tag', 'equalto',
+                      (rw_ranked_slots | sort(attribute='last_used') | first).tag)
+         | list | first }}
 
 - name: Фиксация параметров слота
   ansible.builtin.set_fact:
     cdn_inbound_tag: "{{ cdn_slot.inbound_tag }}"
     cdn_path: "{{ cdn_slot.path }}"
 
+# Подстраховка на будущее: путь слота обязан быть уникальным среди инбаундов профиля.
+# Дубль означает, что сигнатура повторяется — ради чего 30 слотов и заводились.
+- name: 'ПРОВЕРКА: путь слота не дублируется другим инбаундом'
+  ansible.builtin.assert:
+    that: >-
+      (rw_all_inbounds
+       | selectattr('rawInbound.streamSettings.xhttpSettings.path', 'defined')
+       | selectattr('rawInbound.streamSettings.xhttpSettings.path', 'equalto', cdn_path)
+       | list | length) <= 1
+    fail_msg: >-
+      Путь {{ cdn_path }} слота {{ cdn_slot.slot }} есть сразу у нескольких инбаундов
+      ({{ rw_all_inbounds
+          | selectattr('rawInbound.streamSettings.xhttpSettings.path', 'defined')
+          | selectattr('rawInbound.streamSettings.xhttpSettings.path', 'equalto', cdn_path)
+          | map(attribute='tag') | join(', ') }}).
+      Пометь лишний слот reserved: true в playbook/vars/xhttp_signatures.yml
+      либо удали дублирующий инбаунд из профиля.
+
+- name: Отметка слота в журнале выдачи
+  ansible.builtin.copy:
+    content: >-
+      {{ rw_slot_ledger
+         | combine({cdn_inbound_tag: lookup('ansible.builtin.pipe', 'date +%s') | int})
+         | to_nice_json }}
+    dest: "{{ rw_slot_ledger_file }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: not (cdn_dry_run | default(false) | bool)
+
 - name: Выбранный слот
   ansible.builtin.debug:
     msg: >-
       Слот {{ cdn_slot.slot }} ({{ cdn_slot.legend }}): инбаунд {{ cdn_inbound_tag }},
       path {{ cdn_path }}, seqKey {{ cdn_slot.extra.seqKey }}, sessionIDKey {{ cdn_slot.extra.sessionIDKey }}
+      · свободно слотов {{ rw_free_slots | length }},
+      ни разу не выдавалось {{ rw_ranked_slots | selectattr('last_used', 'equalto', 0) | list | length }}

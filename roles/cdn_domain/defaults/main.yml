@@ -8,9 +8,43 @@ cdn_domain_zones:
 
 # Слова для генерации имён. Origin и фронт берут РАЗНЫЕ слова и могут быть в разных зонах —
 # связать их по имени со стороны не выйдет.
-cdn_domain_origin_words: [beas, lemas, kora, vespa, tando, mirel, kasta, norva, seldo, arvi, plesk, tomea]
-cdn_domain_front_words:  [stream, edge, media, live, cdn, node, relay, delta, flux, wave, pulse, cast]
-cdn_domain_front_suffix: [leam, beas, vira, nord, kite, alto, remo, luna, sten, orbi]
+#
+# Слово, once засветившееся в зоне, больше не берётся (см. отсев в tasks/main.yml): иначе
+# новый домен перекликается со старым и связать их — дело одной минуты. Значит каждая ротация
+# СЖИГАЕТ слово, и курируемого списка хватает ненадолго: 2026-08-02 всего 18 записей в трёх
+# зонах выели все 10 суффиксов подчистую и уронили авторотацию node_ch1.
+# Поэтому к спискам подмешивается синтез из слогов (ниже) — он не кончается.
+#
+# ВНИМАНИЕ: слоги и слова — только ASCII и только в кавычках.
+#  · до 2026-08-02 в списке лежало "tandо" с КИРИЛЛИЧЕСКОЙ "о" — выпади оно, ушла бы
+#    не-ASCII метка домена;
+#  · YAML 1.1 понимает no/yes/on/off/n/y как булевы, и слог no приходил как False.
+cdn_domain_origin_words:
+  ["beas", "lemas", "kora", "vespa", "tando", "mirel", "kasta", "norva", "seldo",
+   "arvi", "plesk", "tomea"]
+cdn_domain_front_suffix:
+  ["leam", "beas", "vira", "nord", "kite", "alto", "remo", "luna", "sten", "orbi"]
+
+# Первая часть имени фронта — осмысленное слово: так хост похож на обычную точку раздачи
+# статики. Синтезом её не заменить, поэтому список просто широкий.
+cdn_domain_front_words:
+  ["stream", "edge", "media", "live", "cdn", "node", "relay", "delta", "flux",
+   "wave", "pulse", "cast", "assets", "static", "video", "play", "feed", "hub",
+   "link", "core", "zone", "wire", "beam", "orbit", "signal", "track", "view",
+   "watch", "cache", "sync", "echo", "drift", "spark", "vertex", "prism",
+   "atlas", "quartz", "vector", "lane", "port", "gate", "mesh", "grid",
+   "sphere", "ridge", "dune", "tide"]
+
+# Синтезатор брендоподобных слов: голова + хвост. 30 x 22 = 660 вариантов в том же духе,
+# что и курируемые (kora, norva, seldo, mirel). Кончиться практически не может, а если
+# однажды кончится — освободить слова можно чисткой старых записей (find_orphans.py).
+cdn_syllable_head:
+  ["ka", "ke", "ki", "ko", "ku", "la", "le", "li", "lo", "ma", "me", "mi", "mo",
+   "na", "ne", "ni", "no", "ra", "re", "ri", "ro", "sa", "se", "si", "so",
+   "ta", "te", "ti", "to", "ve"]
+cdn_syllable_tail:
+  ["rva", "sta", "mel", "ndo", "rel", "vis", "nte", "ldo", "rma", "vel", "ntu",
+   "sko", "rda", "lva", "mba", "nsa", "rte", "lto", "vra", "nka", "sel", "dro"]
 
 cloudflare_api_base: "https://api.cloudflare.com/client/v4"
 cdn_domain_env_file: "{{ playbook_dir }}/secrets/.env"

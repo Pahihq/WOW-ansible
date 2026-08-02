@@ -16,6 +16,10 @@ remnawave_balancer_tag_prefix: "proxy"
 # Каким тегом метим хосты CDN-пула.
 remnawave_cdn_host_tag: "CDN_POOL"
 
+# Журнал выдачи слотов: тег инбаунда -> unix-время последней выдачи.
+# Нужен, чтобы 30 сигнатур ходили по кругу, а не возвращались сразу после блокировки.
+rw_slot_ledger_file: "{{ playbook_dir }}/state/.slots.json"
+
 # Параметры создаваемого хоста.
 remnawave_host_alpn: "h2,http/1.1"
 remnawave_host_fingerprint: "firefox"

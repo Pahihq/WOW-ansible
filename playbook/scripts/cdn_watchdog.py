@@ -35,6 +35,12 @@ RU_PROBE = os.environ.get('CDN_RU_PROBE', 'root@45.150.37.205')
 TRIGGER_CODES = {451}      # строго блокировка; всё прочее — только алерт
 STRIKES_REQUIRED = 2       # подряд идущих тиков сторожа с 451
 COOLDOWN_H = 6             # не ротировать одну ноду чаще
+# Сколько минут непрерывного 451 перекрывают cooldown. Смысл: cooldown защищает от
+# карусели, когда новый фронт ложится сразу. Но если фронт прожил своё и лёг «по-честному»,
+# ждать полный cooldown — значит держать ноду мёртвой дольше, чем живёт домен:
+# 2026-08-02 node_ch1 словил 451 через 3 ч после ротации и завис на 3 ч ожидания.
+# От петли по-прежнему страхует DAILY_BUDGET.
+COOLDOWN_OVERRIDE_MIN = 15
 DAILY_BUDGET = 3           # авторотаций в сутки на весь флот
 ALERT_COOLDOWN_H = 3       # как часто повторять алерт по одной ноде
 FRESH_GRACE_MIN = 45       # свежий фронт не трогаем и не алертим: edge дозревает
@@ -192,7 +198,8 @@ def main():
 
     for m in monitors:
         node, front = m['node'], m['front']
-        rec = wd.setdefault(node, {'strikes': 0, 'last_rotation': 0, 'last_alert': 0})
+        rec = wd.setdefault(node, {'strikes': 0, 'last_rotation': 0, 'last_alert': 0,
+                                   'first_451': 0})
         st = node_state(node)
 
         if a.verbose:
@@ -203,6 +210,7 @@ def main():
             if rec['strikes']:
                 log('%s: фронт снова отвечает, счётчик сброшен' % node)
             rec['strikes'] = 0
+            rec['first_451'] = 0
             continue
 
         # Ротация ноды не завершена или монитор ещё не переехал на новый фронт —
@@ -230,18 +238,29 @@ def main():
                     % (node, front, m['status_name'], m['code'] or '—', (m['msg'] or '')[:180]),
                     a.dry_run)
             rec['strikes'] = 0
+            rec['first_451'] = 0
             continue
 
         # --- Класс «451» ---
+        if not rec['strikes']:
+            rec['first_451'] = now_ts()
         rec['strikes'] += 1
-        log('%s: 451 на фронте %s (подряд: %d/%d)'
-            % (node, front, rec['strikes'], STRIKES_REQUIRED))
+        blocked_min = (now_ts() - rec['first_451']) / 60.0
+        log('%s: 451 на фронте %s (подряд: %d/%d, под блоком %d мин)'
+            % (node, front, rec['strikes'], STRIKES_REQUIRED, blocked_min))
         if m['status'] != DOWN or rec['strikes'] < STRIKES_REQUIRED:
             continue
 
-        if now_ts() - rec['last_rotation'] < COOLDOWN_H * 3600:
-            log('%s: cooldown — ротация была менее %d ч назад' % (node, COOLDOWN_H))
-            continue
+        cooldown_left = COOLDOWN_H * 3600 - (now_ts() - rec['last_rotation'])
+        if cooldown_left > 0:
+            # Ждём подтверждения, что фронт лёг всерьёз, а не мигнул сразу после ротации.
+            if blocked_min < COOLDOWN_OVERRIDE_MIN:
+                log('%s: cooldown — ротация была менее %d ч назад; блокировка держится '
+                    '%d из %d мин, нужных чтобы его перекрыть'
+                    % (node, COOLDOWN_H, blocked_min, COOLDOWN_OVERRIDE_MIN))
+                continue
+            log('%s: cooldown (оставалось %.1f ч) перекрыт — 451 непрерывно %d мин'
+                % (node, cooldown_left / 3600.0, blocked_min))
 
         day_ago = now_ts() - 86400
         used = sum(1 for r in wd.values() if r.get('last_rotation', 0) > day_ago)
@@ -277,11 +296,15 @@ def main():
 
         telegram('<b>451 подтверждён — запускаю ротацию</b>\n'
                  'нода: <code>%s</code>\nфронт: <code>%s</code>\n'
-                 'Kuma: DOWN %d тика подряд · проба из Москвы: 451 · origin: 200'
-                 % (node, front, rec['strikes']), a.dry_run)
+                 'под блоком %d мин · Kuma: DOWN %d тика подряд · '
+                 'проба из Москвы: 451 · origin: 200%s'
+                 % (node, front, blocked_min, rec['strikes'],
+                    '\ncooldown перекрыт: блокировка держится дольше %d мин'
+                    % COOLDOWN_OVERRIDE_MIN if cooldown_left > 0 else ''), a.dry_run)
 
         rec['last_rotation'] = now_ts()
         rec['strikes'] = 0
+        rec['first_451'] = 0
         save_wd(wd)                      # фиксируем ДО запуска: падение не должно снять cooldown
         ok, tail = fire_rotation(node, a.dry_run)
         fired.append(node)

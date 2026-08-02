@@ -74,11 +74,27 @@
       {{ cf_all_records.results | map(attribute='json.result') | flatten
          | map(attribute='name') | join(' ') }}
 
+# Курируемые списки кончаются: каждая ротация сжигает слово навсегда. Синтез из слогов
+# добавляет сотни вариантов в том же духе, поэтому словарь не исчерпывается.
+- name: Синтез дополнительных слов
+  ansible.builtin.set_fact:
+    cdn_synth_words: "{{ cdn_syllable_head | product(cdn_syllable_tail) | map('join') | list }}"
+
 - name: Отсев слов, уже засветившихся в зонах
   ansible.builtin.set_fact:
-    cdn_free_origin_words: "{{ cdn_domain_origin_words | reject('in', cf_taken_names) | list }}"
+    cdn_free_origin_words: >-
+      {{ (cdn_domain_origin_words + cdn_synth_words) | reject('in', cf_taken_names) | list }}
     cdn_free_front_words: "{{ cdn_domain_front_words | reject('in', cf_taken_names) | list }}"
-    cdn_free_front_suffix: "{{ cdn_domain_front_suffix | reject('in', cf_taken_names) | list }}"
+    cdn_free_front_suffix: >-
+      {{ (cdn_domain_front_suffix + cdn_synth_words) | reject('in', cf_taken_names) | list }}
+
+- name: Размер словаря
+  ansible.builtin.debug:
+    msg: >-
+      Свободно слов: origin {{ cdn_free_origin_words | length }},
+      front {{ cdn_free_front_words | length }}/{{ cdn_free_front_suffix | length }}
+      (курируемых {{ cdn_domain_origin_words | length }}/{{ cdn_domain_front_words | length }}/{{ cdn_domain_front_suffix | length }},
+      синтезировано {{ cdn_synth_words | length }})
 
 - name: Остановка при исчерпании словаря
   ansible.builtin.assert:
@@ -89,7 +105,9 @@
     fail_msg: >-
       Свободные слова кончились (origin {{ cdn_free_origin_words | length }},
       front {{ cdn_free_front_words | length }}/{{ cdn_free_front_suffix | length }}).
-      Расширь словари в roles/cdn_domain/defaults или вычисти старые записи из зон.
+      Это значит, что зоны забиты старыми доменами: каждое имя в зоне навсегда выводит слово
+      из оборота. Сначала вычисти лишнее — python3 playbook/scripts/find_orphans.py,
+      затем при нужде расширь cdn_syllable_head/tail в roles/cdn_domain/defaults.
 
 - name: Генерация кандидатов
   ansible.builtin.set_fact:

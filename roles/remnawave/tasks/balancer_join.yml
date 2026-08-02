@@ -39,7 +39,12 @@
 - name: Разбор текущего состояния балансера
   ansible.builtin.set_fact:
     rw_tpl_json: "{{ rw_tpl.json.response.templateJson }}"
-    rw_live_uuids: "{{ rw_hosts_all.json.response | map(attribute='uuid') | list }}"
+    # Живым считается только ВКЛЮЧЁННЫЙ хост. Выключенный панель из пула исключает
+    # (isDisabled выкидывает, isHidden только прячет), поэтому его UUID в injectHosts —
+    # мёртвый груз: 2026-08-02 так висел stream-leam после ручной ротации node_nl2.
+    rw_live_uuids: >-
+      {{ rw_hosts_all.json.response | rejectattr('isDisabled')
+         | map(attribute='uuid') | list }}
     # Носитель шаблона не может подставить сам себя — панель его пропустит,
     # и балансер останется без аутбаундов (проверено 2026-07-24).
     rw_carrier_uuids: >-
@@ -65,7 +70,7 @@
 
 - name: Сообщение о вычищенных мёртвых UUID
   ansible.builtin.debug:
-    msg: "Из балансера удалены UUID несуществующих хостов: {{ rw_dead_uuids | join(', ') }}"
+    msg: "Из балансера удалены UUID удалённых и выключенных хостов: {{ rw_dead_uuids | join(', ') }}"
   when: rw_dead_uuids | length > 0
 
 - name: Сборка нового блока injectHosts

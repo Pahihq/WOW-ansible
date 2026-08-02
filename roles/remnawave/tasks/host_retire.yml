@@ -1,9 +1,14 @@
 ---
-# Гасит предыдущее плечо ноды: выключает старый хост и убирает его UUID из балансера.
+# Гасит предыдущее плечо ноды: убирает UUID из балансера и УДАЛЯЕТ старый хост.
 #
 # Вход: remnawave_retire_uuid — UUID хоста прошлой ротации.
-# Хост НЕ удаляется, а выключается: если новый фронт окажется мёртвым, старое плечо
-# можно вернуть одним тумблером в панели. Домены и ресурс VK чистит rotate_cleanup.yml.
+#
+# Хост удаляется (решение от 2026-08-02): иначе выключенные плечи копятся в панели.
+# Слот при этом освобождается в любом случае — занятость считается только по
+# включённым хостам, — так что удаление нужно ради чистоты, а не ради слотов.
+# ⚠️ Откат «включить старое плечо тумблером» после этого невозможен: если новый фронт
+# окажется мёртвым, поднимать придётся новой ротацией.
+# Домены и ресурс VK чистит rotate_cleanup.yml.
 #
 # ВНИМАНИЕ: selector['values'], не selector.values — второе в Jinja резолвится
 # в метод dict.values и вычистка молча не срабатывает.
@@ -30,23 +35,6 @@
   delegate_to: localhost
   become: false
   changed_when: false
-
-- name: Выключение старого хоста
-  ansible.builtin.uri:
-    url: "{{ remnawave_base_url }}/api/hosts/"
-    method: PATCH
-    headers: "{{ remnawave_headers }}"
-    body_format: json
-    body:
-      uuid: "{{ remnawave_retire_uuid }}"
-      isDisabled: true
-    status_code: [200]
-    return_content: true
-  register: rw_retire_off
-  delegate_to: localhost
-  become: false
-  changed_when: rw_retire_off is not skipped
-  when: rw_retire_get.status == 200
 
 - name: Чтение шаблона балансера перед вычисткой
   ansible.builtin.uri:
@@ -95,9 +83,36 @@
     - remnawave_balancer_selector_mode == 'uuids'
     - remnawave_retire_uuid in ((rw_retire_tpl_json.remnawave.injectHosts | first).selector['values'] | default([], true))
 
-- name: Итог гашения старого плеча
+# Удаляем ПОСЛЕ вычистки из балансера: обратный порядок оставил бы в шаблоне
+# ссылку на несуществующий хост до следующего пуша.
+- name: Удаление старого хоста
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/{{ remnawave_retire_uuid }}"
+    method: DELETE
+    headers: "{{ remnawave_headers }}"
+    status_code: [200, 204, 404]
+    return_content: true
+  register: rw_retire_del
+  delegate_to: localhost
+  become: false
+  changed_when: rw_retire_del is not skipped and rw_retire_del.status != 404
+  when: rw_retire_get.status == 200
+
+- name: 'ПРОВЕРКА: старого хоста в панели больше нет'
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/hosts/{{ remnawave_retire_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    status_code: [200, 404]
+    return_content: true
+  register: rw_retire_check
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: rw_retire_check.status == 200
+
+- name: Итог снятия старого плеча
   ansible.builtin.debug:
     msg: >-
       Старое плечо {{ remnawave_retire_uuid }}:
-      {{ 'хост выключен' if rw_retire_get.status == 200 else 'хоста в панели уже нет' }},
+      {{ 'хост удалён' if rw_retire_get.status == 200 else 'хоста в панели уже не было' }},
       плеч в балансере осталось {{ rw_retire_desired | length }}

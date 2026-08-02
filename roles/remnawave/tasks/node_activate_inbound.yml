@@ -35,6 +35,27 @@
       Инбаунд {{ cdn_inbound_tag }} лежит в другом конфиг-профиле, чем нода
       {{ inventory_hostname }} — нода может иметь только один активный профиль.
 
+# Прошлый слот ноды снимаем ТЕМ ЖЕ пушем, что включает новый — иначе рестарт xray
+# будет дважды, а инбаунды копятся: 2026-08-02 SW-2 несла сразу три (P01, P04, P07),
+# и один и тот же CDN_P04 был активен на двух нодах.
+# Снимаем строго СВОЙ прошлый слот из state.prev — чужие инбаунды
+# (CDN_beeline, CDNYandex_v2, CDN_BRIDGEVK_XHTTP) не трогаем никогда.
+- name: UUID прошлого инбаунда этой ноды
+  ansible.builtin.set_fact:
+    rw_prev_inbound_uuid: >-
+      {{ ((rw_all_inbounds
+           | selectattr('tag', 'equalto', (cdn_prev | default({}, true)).inbound_tag | default(''))
+           | list | first).uuid)
+         if (((cdn_prev | default({}, true)).inbound_tag | default('')) | length > 0
+             and ((cdn_prev | default({}, true)).inbound_tag | default('')) != cdn_inbound_tag)
+         else '' }}
+
+- name: Расчёт целевого набора инбаундов ноды
+  ansible.builtin.set_fact:
+    rw_node_desired_uuids: >-
+      {{ ((rw_node_active_uuids | difference([rw_prev_inbound_uuid]))
+          + [rw_target_inbound_uuid]) | unique }}
+
 - name: Включение инбаунда на ноде
   ansible.builtin.uri:
     url: "{{ remnawave_base_url }}/api/nodes/"
@@ -45,14 +66,14 @@
       uuid: "{{ cdn_node_uuid }}"
       configProfile:
         activeConfigProfileUuid: "{{ rw_node_profile }}"
-        activeInbounds: "{{ (rw_node_active_uuids + [rw_target_inbound_uuid]) | unique }}"
+        activeInbounds: "{{ rw_node_desired_uuids }}"
     status_code: [200]
     return_content: true
   register: rw_node_patched
   delegate_to: localhost
   become: false
   changed_when: rw_node_patched is not skipped
-  when: cdn_inbound_tag not in rw_node_active_tags
+  when: (rw_node_desired_uuids | sort) != (rw_node_active_uuids | sort)
 
 - name: Пауза на перезапуск xray после пуша
   ansible.builtin.pause:
