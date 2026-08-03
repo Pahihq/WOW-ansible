@@ -91,6 +91,15 @@
         state: present
         update_cache: true
 
+    # UFW в этом проекте управляет nftables через iptables-nft. Отдельный
+    # nftables.service загружает /etc/nftables.conf (обычно с flush ruleset) и
+    # при запуске после Docker удаляет цепочки DOCKER*.
+    - name: Дебиан/Убунту | Отключить и замаскировать standalone nftables
+      ansible.builtin.systemd:
+        name: nftables
+        enabled: false
+        masked: true
+
     - name: Дебиан/Убунту | Включить локаль en_US.UTF-8
       ansible.builtin.lineinfile:
         path: /etc/locale.gen
@@ -258,18 +267,31 @@
         enabled: true
         state: started
 
+    - name: Проверить служебную цепочку Docker после запуска
+      ansible.builtin.command:
+        argv:
+          - iptables
+          - --wait
+          - -t
+          - filter
+          - -S
+          - DOCKER-FORWARD
+      register: docker_forward_chain
+      changed_when: false
+      failed_when: false
+
+    - name: Восстановить служебные цепочки Docker при необходимости
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+      when: docker_forward_chain.rc != 0
+
 - name: Установите RemnaNode Speedtest и хост-сервисы.
   hosts: all
   become: true
   gather_facts: true
 
   tasks:
-    - name: Включить и запустить nftables
-      ansible.builtin.systemd:
-        name: nftables
-        enabled: true
-        state: started
-
     - name: Установить snapd
       ansible.builtin.apt:
         name: snapd

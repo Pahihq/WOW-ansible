@@ -130,3 +130,24 @@
 - name: "UFW | Включить firewall"
   community.general.ufw:
     state: enabled
+
+# UFW может пересобрать ruleset. Проверяем цепочку после всех его изменений,
+# чтобы не оставлять работающий dockerd с удалёнными правилами маршрутизации.
+- name: "Docker | Проверить цепочку DOCKER-FORWARD после UFW"
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - --wait
+      - -t
+      - filter
+      - -S
+      - DOCKER-FORWARD
+  register: ufw_docker_forward_chain
+  changed_when: false
+  failed_when: false
+
+- name: "Docker | Восстановить цепочки после изменения firewall"
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  when: ufw_docker_forward_chain.rc != 0
