@@ -4,7 +4,8 @@
   gather_facts: false
   connection: local
   tasks:
-    - ansible.builtin.include_role:
+    - name: Отправка сообщения в топик Telegram
+      ansible.builtin.include_role:
         name: telegram
       vars:
         telegram_message: "<b>Проверка топика</b>\nЕсли это сообщение в топике, а не в General — фикс message_thread_id рабочий."

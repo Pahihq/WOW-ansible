@@ -49,7 +49,14 @@
         dest: /etc/systemd/system/vmagent.service
 
     cadvisor_url: "https://github.com/google/cadvisor/releases/download/v{{ cadvisor_version }}/cadvisor-v{{ cadvisor_version }}-linux-amd64"
-    node_exporter_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    node_exporter_url: >-
+      {{
+        'https://github.com/prometheus/node_exporter/releases/download/v'
+        ~ node_exporter_version
+        ~ '/node_exporter-'
+        ~ node_exporter_version
+        ~ '.linux-amd64.tar.gz'
+      }}
     vmagent_url: "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v{{ vmagent_version }}/vmutils-linux-amd64-v{{ vmagent_version }}.tar.gz"
 
   pre_tasks:

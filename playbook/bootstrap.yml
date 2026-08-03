@@ -548,7 +548,8 @@
 
   tasks:
     - name: Найти двоичный файл zsh
-      ansible.builtin.shell: command -v zsh
+      ansible.builtin.command:
+        cmd: which zsh
       register: zsh_binary
       changed_when: false
 

@@ -42,18 +42,33 @@
 
     - name: Сборка инбаундов
       ansible.builtin.set_fact:
-        cp_rendered: "{{ cp_rendered | default([]) + [ {
-          'tag': item.inbound_tag,
-          'port': cdn_inbound_port,
-          'listen': cdn_inbound_listen,
-          'protocol': 'vless',
-          'settings': {'clients': [], 'decryption': 'none'},
-          'sniffing': {'enabled': true, 'destOverride': ['http', 'tls', 'quic']},
-          'streamSettings': {
-            'network': 'xhttp',
-            'security': 'none',
-            'xhttpSettings': {'mode': item.mode, 'path': item.path, 'extra': item.extra}
-          } } ] }}"
+        cp_rendered: >-
+          {{
+            cp_rendered | default([])
+            + [{
+              'tag': item.inbound_tag,
+              'port': cdn_inbound_port,
+              'listen': cdn_inbound_listen,
+              'protocol': 'vless',
+              'settings': {
+                'clients': [],
+                'decryption': 'none'
+              },
+              'sniffing': {
+                'enabled': true,
+                'destOverride': ['http', 'tls', 'quic']
+              },
+              'streamSettings': {
+                'network': 'xhttp',
+                'security': 'none',
+                'xhttpSettings': {
+                  'mode': item.mode,
+                  'path': item.path,
+                  'extra': item.extra
+                }
+              }
+            }]
+          }}
       loop: "{{ cp_missing }}"
       loop_control:
         label: "{{ item.inbound_tag }} {{ item.path }}"

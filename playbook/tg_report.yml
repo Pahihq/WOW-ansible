@@ -1,9 +1,11 @@
 ---
-- hosts: localhost
+- name: Тест отчёта Telegram
+  hosts: localhost
   connection: local
   gather_facts: false
   tasks:
-    - ansible.builtin.include_role: { name: telegram }
+    - name: Отправка тестового отчёта Telegram
+      ansible.builtin.include_role: { name: telegram }
       vars:
         telegram_message: |-
           <b>Ротация CDN выполнена</b>

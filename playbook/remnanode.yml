@@ -6,15 +6,9 @@
 
   vars:
     remnanode_dir: /opt/remnanode
-    remnanode_install_profile: "{{ remnanode_profile | default('plain') }}"
-
     supported_distributions:
       - Debian
       - Ubuntu
-
-    remnanode_supported_profiles:
-      - plain
-      - trojan_grpc
 
   tasks:
     - name: Проверить поддержку дистрибутива
@@ -28,14 +22,6 @@
           Текущая система: {{ ansible_distribution }}
           {{ ansible_distribution_version }}
           {{ ansible_distribution_release | default('неизвестно') }}
-
-    - name: Проверить профиль установки RemnaNode
-      ansible.builtin.assert:
-        that:
-          - remnanode_install_profile in remnanode_supported_profiles
-        fail_msg: >-
-          Неподдерживаемый remnanode_profile={{ remnanode_install_profile }}.
-          Используйте один из профилей: {{ remnanode_supported_profiles | join(', ') }}.
 
     - name: Создать каталог RemnaNode
       ansible.builtin.file:
@@ -51,7 +37,6 @@
   gather_facts: false
 
   vars:
-    remnanode_install_profile: "{{ remnanode_profile | default('plain') }}"
     remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
     remnanode_dir: /opt/remnanode
     remnanode_xray_share_dir: /opt/remnawave/xray/share
@@ -60,10 +45,6 @@
     remnanode_api_port: 21412
 
   pre_tasks:
-    - name: Пропустить стандартную установку RemnaNode для другого профиля
-      ansible.builtin.meta: end_host
-      when: remnanode_install_profile != 'plain'
-
     - name: Проверить локальный файл секретного ключа Remnawave
       ansible.builtin.stat:
         path: "{{ remnanode_secret_key_file }}"
@@ -124,7 +105,6 @@
     - name: Показать параметры подключения стандартного RemnaNode
       ansible.builtin.debug:
         msg:
-          - "Профиль: plain"
           - "Порт API: {{ remnanode_api_port }}"
 
   handlers:
@@ -132,238 +112,4 @@
       ansible.builtin.command: docker compose up -d --remove-orphans
       args:
         chdir: "{{ remnanode_dir }}"
-
-- name: Установить Docker-стек Trojan gRPC для Remnawave Node
-  hosts: docker_nodes
-  become: true
-  gather_facts: true
-
-  vars:
-    remnanode_install_profile: "{{ remnanode_profile | default('plain') }}"
-    remnanode_domain: "{{ domain | default(node_domain | default(inventory_hostname)) }}"
-    remnanode_email: admin@wowsecure.ru
-    remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
-
-    remnanode_dir: /opt/remnanode
-    remnanode_xray_share_dir: /opt/remnawave/xray/share
-    remnanode_zapret_dat_url: https://github.com/kutovoys/ru_gov_zapret/releases/latest/download/zapret.dat
-    remnanode_zapret_dat_path: "{{ remnanode_xray_share_dir }}/zapret.dat"
-    certbot_dir: /opt/certbot
-    web_root: /var/www/html
-    site_host_dir: "{{ remnanode_dir }}/site"
-    site_archive_local: "{{ playbook_dir }}/files/site.zip"
-    site_archive_remote: "{{ remnanode_dir }}/site.zip"
-
-    grpc_service_name: trgrpc
-    xray_grpc_listen: 127.0.0.1
-    xray_grpc_port: 8443
-    remnanode_api_port: 21412
-
-  pre_tasks:
-    - name: Пропустить установку Trojan gRPC RemnaNode для другого профиля
-      ansible.builtin.meta: end_host
-      when: remnanode_install_profile != 'trojan_grpc'
-
-    - name: Проверить обязательные переменные inventory
-      ansible.builtin.assert:
-        that:
-          - remnanode_domain is defined
-          - remnanode_domain | length > 3
-          - remnanode_email is defined
-          - remnanode_email | length > 3
-        fail_msg: "Укажите домен в inventory для этого хоста."
-
-    - name: Проверить локальный файл секретного ключа Remnawave
-      ansible.builtin.stat:
-        path: "{{ remnanode_secret_key_file }}"
-      delegate_to: localhost
-      become: false
-      register: remnanode_secret_key_file_stat
-
-    - name: Проверить наличие локального файла секретного ключа
-      ansible.builtin.assert:
-        that:
-          - remnanode_secret_key_file_stat.stat.exists
-        fail_msg: "Отсутствует файл секретного ключа: {{ remnanode_secret_key_file }}"
-
-    - name: Проверить локальный архив сайта
-      ansible.builtin.stat:
-        path: "{{ site_archive_local }}"
-      delegate_to: localhost
-      become: false
-      register: site_archive_local_stat
-
-    - name: Проверить наличие локального архива сайта
-      ansible.builtin.assert:
-        that:
-          - site_archive_local_stat.stat.exists
-        fail_msg: "Отсутствует архив сайта: {{ site_archive_local }}"
-
-    - name: Прочитать локальный секретный ключ Remnawave
-      ansible.builtin.set_fact:
-        remnanode_secret_key: "{{ lookup('ansible.builtin.file', remnanode_secret_key_file) | trim }}"
-      no_log: true
-
-    - name: Проверить Docker CLI
-      ansible.builtin.command: docker --version
-      register: docker_cli_check
-      changed_when: false
-
-    - name: Проверить плагин Docker Compose
-      ansible.builtin.command: docker compose version
-      register: docker_compose_check
-      changed_when: false
-
-  tasks:
-    - name: Создать необходимые каталоги
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-      loop:
-        - "{{ remnanode_dir }}"
-        - "{{ remnanode_xray_share_dir }}"
-        - "{{ site_host_dir }}"
-        - /var/www
-        - "{{ certbot_dir }}"
-        - "{{ certbot_dir }}/certs"
-        - "{{ certbot_dir }}/var-lib-letsencrypt"
-
-    - name: Скачать базу маршрутизации zapret
-      ansible.builtin.get_url:
-        url: "{{ remnanode_zapret_dat_url }}"
-        dest: "{{ remnanode_zapret_dat_path }}"
-        owner: root
-        group: root
-        mode: "0644"
-        force: true
-      notify:
-        - Запустить стек Remnawave
-
-    - name: Создать ссылку корневого каталога nginx на каталог сайта Remnawave
-      ansible.builtin.file:
-        src: "{{ site_host_dir }}"
-        dest: "{{ web_root }}"
-        state: link
-        force: true
-        owner: root
-        group: root
-
-    - name: Создать резервную веб-страницу
-      ansible.builtin.template:
-        src: templates/remnanode-index.html.j2
-        dest: "{{ site_host_dir }}/index.html"
-        owner: root
-        group: root
-        mode: "0644"
-
-    - name: Скопировать архив сайта в каталог Remnawave
-      ansible.builtin.copy:
-        src: "{{ site_archive_local }}"
-        dest: "{{ site_archive_remote }}"
-        owner: root
-        group: root
-        mode: "0644"
-
-    - name: Распаковать архив сайта в каталог Remnawave
-      ansible.builtin.shell: |
-        set -euo pipefail
-
-        rm -rf {{ site_host_dir | quote }}/*
-        unzip -oq {{ site_archive_remote | quote }} -d {{ site_host_dir | quote }}
-
-        chown -R root:root {{ site_host_dir | quote }}
-        find {{ site_host_dir | quote }} -type d -exec chmod 0755 {} \;
-        find {{ site_host_dir | quote }} -type f -exec chmod 0644 {} \;
-      args:
-        executable: /bin/bash
-
-    - name: Проверить существующий сертификат Let's Encrypt
-      ansible.builtin.stat:
-        path: "{{ certbot_dir }}/certs/live/{{ remnanode_domain }}/fullchain.pem"
-      register: letsencrypt_fullchain
-
-    - name: Выпустить сертификат Let's Encrypt
-      ansible.builtin.command:
-        argv:
-          - docker
-          - run
-          - --rm
-          - -v
-          - "{{ certbot_dir }}/certs:/etc/letsencrypt"
-          - -v
-          - "{{ certbot_dir }}/var-lib-letsencrypt:/var/lib/letsencrypt"
-          - --network
-          - host
-          - certbot/certbot
-          - certonly
-          - --standalone
-          - --non-interactive
-          - --agree-tos
-          - --email
-          - "{{ remnanode_email }}"
-          - -d
-          - "{{ remnanode_domain }}"
-      when: not letsencrypt_fullchain.stat.exists
-      notify: Запустить стек Remnawave
-
-    - name: Создать конфигурацию nginx
-      ansible.builtin.template:
-        src: templates/remnanode-nginx.conf.j2
-        dest: "{{ remnanode_dir }}/nginx.conf"
-        owner: root
-        group: root
-        mode: "0644"
-      notify:
-        - Запустить стек Remnawave
-        - Проверить конфигурацию nginx
-        - Перезагрузить nginx
-
-    - name: Создать Compose-файл Remnawave Node
-      ansible.builtin.template:
-        src: templates/remnanode-docker-compose-trogan.yml.j2
-        dest: "{{ remnanode_dir }}/docker-compose.yml"
-        owner: root
-        group: root
-        mode: "0600"
-      no_log: true
-      notify:
-        - Запустить стек Remnawave
-        - Проверить конфигурацию nginx
-        - Перезагрузить nginx
-
-    - name: Проверить HTTPS-эндпоинт состояния
-      ansible.builtin.command:
-        argv:
-          - curl
-          - -fsS
-          - --max-time
-          - "10"
-          - "https://{{ remnanode_domain }}/healthz"
-      register: healthz_check
-      changed_when: false
-
-    - name: Показать параметры подключения
-      ansible.builtin.debug:
-        msg:
-          - "Адрес/SNI/хост: {{ remnanode_domain }}"
-          - "Порт: 443"
-          - "Протокол: Trojan"
-          - "Сеть: gRPC"
-          - "Безопасность: TLS"
-          - "Имя сервиса gRPC: {{ grpc_service_name }}"
-          - "Внутренний Xray gRPC: {{ xray_grpc_listen }}:{{ xray_grpc_port }}"
-
-  handlers:
-    - name: Запустить стек Remnawave
-      ansible.builtin.command: docker compose up -d --remove-orphans
-      args:
-        chdir: "{{ remnanode_dir }}"
-
-    - name: Проверить конфигурацию nginx
-      ansible.builtin.command: docker exec remnawave-nginx nginx -t
-
-    - name: Перезагрузить nginx
-      ansible.builtin.shell: docker exec remnawave-nginx nginx -s reload || docker restart remnawave-nginx
+      changed_when: true

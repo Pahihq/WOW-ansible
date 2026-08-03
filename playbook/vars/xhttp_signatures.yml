@@ -16,1117 +16,1117 @@
 # Слот P07 (streaming) = действующая боевая сигнатура инбаунда CDNVK, менять нельзя.
 
 xhttp_signatures:
-- slot: P01
-  legend: bookstore
-  inbound_tag: CDN_P01
-  path: /api/library/sync
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+  - slot: P01
+    legend: bookstore
+    inbound_tag: CDN_P01
     path: /api/library/sync
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: page
-    seqPlacement: cookie
-    sessionKey: reader_id
-    sessionPlacement: cookie
-    sessionIDKey: reader_id
-    sessionIDPlacement: cookie
-    xPaddingKey: _r
-    xPaddingHeader: X-Library-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/vnd.api+json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P02
-  legend: techshop
-  inbound_tag: CDN_P02
-  path: /api/account/profile
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/library/sync
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: page
+      seqPlacement: cookie
+      sessionKey: reader_id
+      sessionPlacement: cookie
+      sessionIDKey: reader_id
+      sessionIDPlacement: cookie
+      xPaddingKey: _r
+      xPaddingHeader: X-Library-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/vnd.api+json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P02
+    legend: techshop
+    inbound_tag: CDN_P02
     path: /api/account/profile
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: device_id
-    seqPlacement: cookie
-    sessionKey: user_session
-    sessionPlacement: cookie
-    sessionIDKey: user_session
-    sessionIDPlacement: cookie
-    xPaddingKey: _a
-    xPaddingHeader: X-Profile-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/vnd.api+json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P03
-  legend: magazine
-  inbound_tag: CDN_P03
-  path: /api/feed/articles
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/account/profile
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: device_id
+      seqPlacement: cookie
+      sessionKey: user_session
+      sessionPlacement: cookie
+      sessionIDKey: user_session
+      sessionIDPlacement: cookie
+      xPaddingKey: _a
+      xPaddingHeader: X-Profile-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/vnd.api+json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P03
+    legend: magazine
+    inbound_tag: CDN_P03
     path: /api/feed/articles
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: csrftoken
-    seqPlacement: cookie
-    sessionKey: session_id
-    sessionPlacement: cookie
-    sessionIDKey: session_id
-    sessionIDPlacement: cookie
-    xPaddingKey: _t
-    xPaddingHeader: X-CSRFToken
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: text/html
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P04
-  legend: coffee
-  inbound_tag: CDN_P04
-  path: /api/menu/recommendations
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/feed/articles
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: csrftoken
+      seqPlacement: cookie
+      sessionKey: session_id
+      sessionPlacement: cookie
+      sessionIDKey: session_id
+      sessionIDPlacement: cookie
+      xPaddingKey: _t
+      xPaddingHeader: X-CSRFToken
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: text/html
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P04
+    legend: coffee
+    inbound_tag: CDN_P04
     path: /api/menu/recommendations
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: delivery_zone
-    seqPlacement: cookie
-    sessionKey: customer_ref
-    sessionPlacement: cookie
-    sessionIDKey: customer_ref
-    sessionIDPlacement: cookie
-    xPaddingKey: _d
-    xPaddingHeader: X-Order-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P05
-  legend: sneakers
-  inbound_tag: CDN_P05
-  path: /api/cart/session
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/menu/recommendations
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: delivery_zone
+      seqPlacement: cookie
+      sessionKey: customer_ref
+      sessionPlacement: cookie
+      sessionIDKey: customer_ref
+      sessionIDPlacement: cookie
+      xPaddingKey: _d
+      xPaddingHeader: X-Order-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P05
+    legend: sneakers
+    inbound_tag: CDN_P05
     path: /api/cart/session
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: basket_id
-    seqPlacement: cookie
-    sessionKey: shopper_sid
-    sessionPlacement: cookie
-    sessionIDKey: shopper_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _s
-    xPaddingHeader: X-Store-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P06
-  legend: garden
-  inbound_tag: CDN_P06
-  path: /api/garden/feed
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/cart/session
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: basket_id
+      seqPlacement: cookie
+      sessionKey: shopper_sid
+      sessionPlacement: cookie
+      sessionIDKey: shopper_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _s
+      xPaddingHeader: X-Store-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P06
+    legend: garden
+    inbound_tag: CDN_P06
     path: /api/garden/feed
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: preferences
-    seqPlacement: cookie
-    sessionKey: member_id
-    sessionPlacement: cookie
-    sessionIDKey: member_id
-    sessionIDPlacement: cookie
-    xPaddingKey: _g
-    xPaddingHeader: X-Plant-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P07
-  legend: streaming
-  inbound_tag: CDN_P07
-  # ЗАРЕЗЕРВИРОВАН, аллокатору не выдавать: это зеркало легаси-инбаунда CDNVK —
-  # тот же path /api/stream/room. Выдача слота означала бы два инбаунда с одинаковым
-  # путём в профиле и повтор сигнатуры, уже светившейся на снятом фронте stream-leam.
-  reserved: true
-  path: /api/stream/room
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/garden/feed
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: preferences
+      seqPlacement: cookie
+      sessionKey: member_id
+      sessionPlacement: cookie
+      sessionIDKey: member_id
+      sessionIDPlacement: cookie
+      xPaddingKey: _g
+      xPaddingHeader: X-Plant-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P07
+    legend: streaming
+    inbound_tag: CDN_P07
+    # ЗАРЕЗЕРВИРОВАН, аллокатору не выдавать: это зеркало легаси-инбаунда CDNVK —
+    # тот же path /api/stream/room. Выдача слота означала бы два инбаунда с одинаковым
+    # путём в профиле и повтор сигнатуры, уже светившейся на снятом фронте stream-leam.
+    reserved: true
     path: /api/stream/room
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: metrictoken
-    seqPlacement: cookie
-    sessionKey: customer_id
-    sessionPlacement: cookie
-    sessionIDKey: customer_id
-    sessionIDPlacement: cookie
-    xPaddingKey: _ts
-    xPaddingHeader: X-Access-Profile-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P08
-  legend: fitness
-  inbound_tag: CDN_P08
-  path: /api/workout/progress
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/stream/room
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: metrictoken
+      seqPlacement: cookie
+      sessionKey: customer_id
+      sessionPlacement: cookie
+      sessionIDKey: customer_id
+      sessionIDPlacement: cookie
+      xPaddingKey: _ts
+      xPaddingHeader: X-Access-Profile-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P08
+    legend: fitness
+    inbound_tag: CDN_P08
     path: /api/workout/progress
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: plan_id
-    seqPlacement: cookie
-    sessionKey: athlete_sid
-    sessionPlacement: cookie
-    sessionIDKey: athlete_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _f
-    xPaddingHeader: X-Training-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P09
-  legend: realestate
-  inbound_tag: CDN_P09
-  path: /api/listings/watch
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/workout/progress
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: plan_id
+      seqPlacement: cookie
+      sessionKey: athlete_sid
+      sessionPlacement: cookie
+      sessionIDKey: athlete_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _f
+      xPaddingHeader: X-Training-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P09
+    legend: realestate
+    inbound_tag: CDN_P09
     path: /api/listings/watch
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: region_code
-    seqPlacement: cookie
-    sessionKey: client_ref
-    sessionPlacement: cookie
-    sessionIDKey: client_ref
-    sessionIDPlacement: cookie
-    xPaddingKey: _e
-    xPaddingHeader: X-Estate-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/vnd.api+json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P10
-  legend: travel
-  inbound_tag: CDN_P10
-  path: /api/booking/availability
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/listings/watch
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: region_code
+      seqPlacement: cookie
+      sessionKey: client_ref
+      sessionPlacement: cookie
+      sessionIDKey: client_ref
+      sessionIDPlacement: cookie
+      xPaddingKey: _e
+      xPaddingHeader: X-Estate-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/vnd.api+json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P10
+    legend: travel
+    inbound_tag: CDN_P10
     path: /api/booking/availability
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: trip_id
-    seqPlacement: cookie
-    sessionKey: traveller_sid
-    sessionPlacement: cookie
-    sessionIDKey: traveller_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _v
-    xPaddingHeader: X-Booking-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P11
-  legend: banking
-  inbound_tag: CDN_P11
-  path: /api/statements/sync
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/booking/availability
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: trip_id
+      seqPlacement: cookie
+      sessionKey: traveller_sid
+      sessionPlacement: cookie
+      sessionIDKey: traveller_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _v
+      xPaddingHeader: X-Booking-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P11
+    legend: banking
+    inbound_tag: CDN_P11
     path: /api/statements/sync
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: acc_ref
-    seqPlacement: cookie
-    sessionKey: session_ref
-    sessionPlacement: cookie
-    sessionIDKey: session_ref
-    sessionIDPlacement: cookie
-    xPaddingKey: _b
-    xPaddingHeader: X-Ledger-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P12
-  legend: news
-  inbound_tag: CDN_P12
-  path: /api/news/timeline
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/statements/sync
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: acc_ref
+      seqPlacement: cookie
+      sessionKey: session_ref
+      sessionPlacement: cookie
+      sessionIDKey: session_ref
+      sessionIDPlacement: cookie
+      xPaddingKey: _b
+      xPaddingHeader: X-Ledger-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P12
+    legend: news
+    inbound_tag: CDN_P12
     path: /api/news/timeline
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: topic_id
-    seqPlacement: cookie
-    sessionKey: visitor_id
-    sessionPlacement: cookie
-    sessionIDKey: visitor_id
-    sessionIDPlacement: cookie
-    xPaddingKey: _n
-    xPaddingHeader: X-Feed-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: text/html
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P13
-  legend: music
-  inbound_tag: CDN_P13
-  path: /api/playlist/track
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/news/timeline
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: topic_id
+      seqPlacement: cookie
+      sessionKey: visitor_id
+      sessionPlacement: cookie
+      sessionIDKey: visitor_id
+      sessionIDPlacement: cookie
+      xPaddingKey: _n
+      xPaddingHeader: X-Feed-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: text/html
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P13
+    legend: music
+    inbound_tag: CDN_P13
     path: /api/playlist/track
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: track_seq
-    seqPlacement: cookie
-    sessionKey: listener_id
-    sessionPlacement: cookie
-    sessionIDKey: listener_id
-    sessionIDPlacement: cookie
-    xPaddingKey: _m
-    xPaddingHeader: X-Player-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P14
-  legend: photo
-  inbound_tag: CDN_P14
-  path: /api/gallery/manifest
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/playlist/track
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: track_seq
+      seqPlacement: cookie
+      sessionKey: listener_id
+      sessionPlacement: cookie
+      sessionIDKey: listener_id
+      sessionIDPlacement: cookie
+      xPaddingKey: _m
+      xPaddingHeader: X-Player-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P14
+    legend: photo
+    inbound_tag: CDN_P14
     path: /api/gallery/manifest
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: album_id
-    seqPlacement: cookie
-    sessionKey: viewer_sid
-    sessionPlacement: cookie
-    sessionIDKey: viewer_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _p
-    xPaddingHeader: X-Gallery-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P15
-  legend: recipes
-  inbound_tag: CDN_P15
-  path: /api/kitchen/steps
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/gallery/manifest
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: album_id
+      seqPlacement: cookie
+      sessionKey: viewer_sid
+      sessionPlacement: cookie
+      sessionIDKey: viewer_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _p
+      xPaddingHeader: X-Gallery-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P15
+    legend: recipes
+    inbound_tag: CDN_P15
     path: /api/kitchen/steps
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: step_no
-    seqPlacement: cookie
-    sessionKey: cook_id
-    sessionPlacement: cookie
-    sessionIDKey: cook_id
-    sessionIDPlacement: cookie
-    xPaddingKey: _k
-    xPaddingHeader: X-Recipe-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P16
-  legend: education
-  inbound_tag: CDN_P16
-  path: /api/course/lesson
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/kitchen/steps
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: step_no
+      seqPlacement: cookie
+      sessionKey: cook_id
+      sessionPlacement: cookie
+      sessionIDKey: cook_id
+      sessionIDPlacement: cookie
+      xPaddingKey: _k
+      xPaddingHeader: X-Recipe-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P16
+    legend: education
+    inbound_tag: CDN_P16
     path: /api/course/lesson
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: lesson_no
-    seqPlacement: cookie
-    sessionKey: student_sid
-    sessionPlacement: cookie
-    sessionIDKey: student_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _l
-    xPaddingHeader: X-Course-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/vnd.api+json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P17
-  legend: logistics
-  inbound_tag: CDN_P17
-  path: /api/shipment/track
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/course/lesson
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: lesson_no
+      seqPlacement: cookie
+      sessionKey: student_sid
+      sessionPlacement: cookie
+      sessionIDKey: student_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _l
+      xPaddingHeader: X-Course-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/vnd.api+json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P17
+    legend: logistics
+    inbound_tag: CDN_P17
     path: /api/shipment/track
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: parcel_seq
-    seqPlacement: cookie
-    sessionKey: sender_id
-    sessionPlacement: cookie
-    sessionIDKey: sender_id
-    sessionIDPlacement: cookie
-    xPaddingKey: _w
-    xPaddingHeader: X-Shipment-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P18
-  legend: weather
-  inbound_tag: CDN_P18
-  path: /api/forecast/tiles
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/shipment/track
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: parcel_seq
+      seqPlacement: cookie
+      sessionKey: sender_id
+      sessionPlacement: cookie
+      sessionIDKey: sender_id
+      sessionIDPlacement: cookie
+      xPaddingKey: _w
+      xPaddingHeader: X-Shipment-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P18
+    legend: weather
+    inbound_tag: CDN_P18
     path: /api/forecast/tiles
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: tile_idx
-    seqPlacement: cookie
-    sessionKey: station_sid
-    sessionPlacement: cookie
-    sessionIDKey: station_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _c
-    xPaddingHeader: X-Forecast-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P19
-  legend: automotive
-  inbound_tag: CDN_P19
-  path: /api/vehicle/telemetry
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/forecast/tiles
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: tile_idx
+      seqPlacement: cookie
+      sessionKey: station_sid
+      sessionPlacement: cookie
+      sessionIDKey: station_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _c
+      xPaddingHeader: X-Forecast-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P19
+    legend: automotive
+    inbound_tag: CDN_P19
     path: /api/vehicle/telemetry
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: trip_seq
-    seqPlacement: cookie
-    sessionKey: vehicle_sid
-    sessionPlacement: cookie
-    sessionIDKey: vehicle_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _u
-    xPaddingHeader: X-Telemetry-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P20
-  legend: pharmacy
-  inbound_tag: CDN_P20
-  path: /api/catalog/stock
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/vehicle/telemetry
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: trip_seq
+      seqPlacement: cookie
+      sessionKey: vehicle_sid
+      sessionPlacement: cookie
+      sessionIDKey: vehicle_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _u
+      xPaddingHeader: X-Telemetry-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P20
+    legend: pharmacy
+    inbound_tag: CDN_P20
     path: /api/catalog/stock
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: sku_page
-    seqPlacement: cookie
-    sessionKey: pharm_sid
-    sessionPlacement: cookie
-    sessionIDKey: pharm_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _h
-    xPaddingHeader: X-Catalog-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P21
-  legend: gaming
-  inbound_tag: CDN_P21
-  path: /api/match/state
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/catalog/stock
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: sku_page
+      seqPlacement: cookie
+      sessionKey: pharm_sid
+      sessionPlacement: cookie
+      sessionIDKey: pharm_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _h
+      xPaddingHeader: X-Catalog-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P21
+    legend: gaming
+    inbound_tag: CDN_P21
     path: /api/match/state
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: tick
-    seqPlacement: cookie
-    sessionKey: player_sid
-    sessionPlacement: cookie
-    sessionIDKey: player_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _q
-    xPaddingHeader: X-Match-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P22
-  legend: jobs
-  inbound_tag: CDN_P22
-  path: /api/vacancy/feed
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/match/state
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: tick
+      seqPlacement: cookie
+      sessionKey: player_sid
+      sessionPlacement: cookie
+      sessionIDKey: player_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _q
+      xPaddingHeader: X-Match-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P22
+    legend: jobs
+    inbound_tag: CDN_P22
     path: /api/vacancy/feed
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: offset_id
-    seqPlacement: cookie
-    sessionKey: applicant_sid
-    sessionPlacement: cookie
-    sessionIDKey: applicant_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _j
-    xPaddingHeader: X-Vacancy-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/vnd.api+json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P23
-  legend: insurance
-  inbound_tag: CDN_P23
-  path: /api/policy/documents
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/vacancy/feed
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: offset_id
+      seqPlacement: cookie
+      sessionKey: applicant_sid
+      sessionPlacement: cookie
+      sessionIDKey: applicant_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _j
+      xPaddingHeader: X-Vacancy-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/vnd.api+json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P23
+    legend: insurance
+    inbound_tag: CDN_P23
     path: /api/policy/documents
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: doc_page
-    seqPlacement: cookie
-    sessionKey: policy_sid
-    sessionPlacement: cookie
-    sessionIDKey: policy_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _i
-    xPaddingHeader: X-Policy-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P24
-  legend: crypto
-  inbound_tag: CDN_P24
-  path: /api/market/depth
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/policy/documents
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: doc_page
+      seqPlacement: cookie
+      sessionKey: policy_sid
+      sessionPlacement: cookie
+      sessionIDKey: policy_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _i
+      xPaddingHeader: X-Policy-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P24
+    legend: crypto
+    inbound_tag: CDN_P24
     path: /api/market/depth
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: depth_seq
-    seqPlacement: cookie
-    sessionKey: trader_sid
-    sessionPlacement: cookie
-    sessionIDKey: trader_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _x
-    xPaddingHeader: X-Market-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P25
-  legend: furniture
-  inbound_tag: CDN_P25
-  path: /api/showroom/items
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/market/depth
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: depth_seq
+      seqPlacement: cookie
+      sessionKey: trader_sid
+      sessionPlacement: cookie
+      sessionIDKey: trader_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _x
+      xPaddingHeader: X-Market-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P25
+    legend: furniture
+    inbound_tag: CDN_P25
     path: /api/showroom/items
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: room_id
-    seqPlacement: cookie
-    sessionKey: buyer_sid
-    sessionPlacement: cookie
-    sessionIDKey: buyer_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _o
-    xPaddingHeader: X-Showroom-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P26
-  legend: pets
-  inbound_tag: CDN_P26
-  path: /api/pets/schedule
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/showroom/items
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: room_id
+      seqPlacement: cookie
+      sessionKey: buyer_sid
+      sessionPlacement: cookie
+      sessionIDKey: buyer_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _o
+      xPaddingHeader: X-Showroom-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P26
+    legend: pets
+    inbound_tag: CDN_P26
     path: /api/pets/schedule
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: slot_id
-    seqPlacement: cookie
-    sessionKey: owner_sid
-    sessionPlacement: cookie
-    sessionIDKey: owner_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _y
-    xPaddingHeader: X-Schedule-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P27
-  legend: cinema
-  inbound_tag: CDN_P27
-  path: /api/session/seats
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/pets/schedule
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: slot_id
+      seqPlacement: cookie
+      sessionKey: owner_sid
+      sessionPlacement: cookie
+      sessionIDKey: owner_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _y
+      xPaddingHeader: X-Schedule-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P27
+    legend: cinema
+    inbound_tag: CDN_P27
     path: /api/session/seats
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: hall_seq
-    seqPlacement: cookie
-    sessionKey: guest_sid
-    sessionPlacement: cookie
-    sessionIDKey: guest_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _z
-    xPaddingHeader: X-Seats-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P28
-  legend: charity
-  inbound_tag: CDN_P28
-  path: /api/campaign/updates
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/session/seats
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: hall_seq
+      seqPlacement: cookie
+      sessionKey: guest_sid
+      sessionPlacement: cookie
+      sessionIDKey: guest_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _z
+      xPaddingHeader: X-Seats-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P28
+    legend: charity
+    inbound_tag: CDN_P28
     path: /api/campaign/updates
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: update_id
-    seqPlacement: cookie
-    sessionKey: donor_sid
-    sessionPlacement: cookie
-    sessionIDKey: donor_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _ch
-    xPaddingHeader: X-Campaign-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: text/html
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P29
-  legend: hardware
-  inbound_tag: CDN_P29
-  path: /api/inventory/delta
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/campaign/updates
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: update_id
+      seqPlacement: cookie
+      sessionKey: donor_sid
+      sessionPlacement: cookie
+      sessionIDKey: donor_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _ch
+      xPaddingHeader: X-Campaign-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: text/html
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P29
+    legend: hardware
+    inbound_tag: CDN_P29
     path: /api/inventory/delta
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: delta_seq
-    seqPlacement: cookie
-    sessionKey: branch_sid
-    sessionPlacement: cookie
-    sessionIDKey: branch_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _hw
-    xPaddingHeader: X-Inventory-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
-- slot: P30
-  legend: medtech
-  inbound_tag: CDN_P30
-  path: /api/records/stream
-  mode: auto
-  uplink_http_method: HEAD
-  extra:
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/inventory/delta
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: delta_seq
+      seqPlacement: cookie
+      sessionKey: branch_sid
+      sessionPlacement: cookie
+      sessionIDKey: branch_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _hw
+      xPaddingHeader: X-Inventory-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache
+  - slot: P30
+    legend: medtech
+    inbound_tag: CDN_P30
     path: /api/records/stream
-    xmux:
-      cMaxLifetimeMs: 0
-      cMaxReuseTimes: 36-96
-      maxConcurrency: 16-32
-      maxConnections: '0'
-      hMaxRequestTimes: 320-640
-      hMaxReusableSecs: 720-1800
-    seqKey: record_seq
-    seqPlacement: cookie
-    sessionKey: clinic_sid
-    sessionPlacement: cookie
-    sessionIDKey: clinic_sid
-    sessionIDPlacement: cookie
-    xPaddingKey: _md
-    xPaddingHeader: X-Records-Token
-    xPaddingMethod: tokenish
-    xPaddingBytes: 100-1000
-    xPaddingObfsMode: true
-    xPaddingPlacement: queryInHeader
-    uplinkChunkSize: 0
-    uplinkHTTPMethod: HEAD
-    uplinkDataPlacement: body
-    scMaxEachPostBytes: '1000000'
-    scMinPostsIntervalMs: '70'
-    headers:
-      Accept: application/json
-      Accept-Language: ru-RU,ru;q=0.9
-      Cache-Control: no-cache
-      Pragma: no-cache
+    mode: auto
+    uplink_http_method: HEAD
+    extra:
+      path: /api/records/stream
+      xmux:
+        cMaxLifetimeMs: 0
+        cMaxReuseTimes: 36-96
+        maxConcurrency: 16-32
+        maxConnections: '0'
+        hMaxRequestTimes: 320-640
+        hMaxReusableSecs: 720-1800
+      seqKey: record_seq
+      seqPlacement: cookie
+      sessionKey: clinic_sid
+      sessionPlacement: cookie
+      sessionIDKey: clinic_sid
+      sessionIDPlacement: cookie
+      xPaddingKey: _md
+      xPaddingHeader: X-Records-Token
+      xPaddingMethod: tokenish
+      xPaddingBytes: 100-1000
+      xPaddingObfsMode: true
+      xPaddingPlacement: queryInHeader
+      uplinkChunkSize: 0
+      uplinkHTTPMethod: HEAD
+      uplinkDataPlacement: body
+      scMaxEachPostBytes: '1000000'
+      scMinPostsIntervalMs: '70'
+      headers:
+        Accept: application/json
+        Accept-Language: ru-RU,ru;q=0.9
+        Cache-Control: no-cache
+        Pragma: no-cache

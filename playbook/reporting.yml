@@ -2,16 +2,6 @@
 - name: Collect host inventory and speedtest data
   hosts: all
   gather_facts: true
-  vars:
-    speedtest_command: |
-      if command -v speedtest >/dev/null 2>&1; then
-        speedtest --accept-license --accept-gdpr --format=json && exit 0
-      fi
-      if command -v speedtest-cli >/dev/null 2>&1; then
-        speedtest-cli --json && exit 0
-        speedtest-cli && exit 0
-      fi
-      exit 127
   tasks:
     - name: Detect public IP
       ansible.builtin.uri:
@@ -29,7 +19,15 @@
       failed_when: false
 
     - name: Run speedtest when available
-      ansible.builtin.shell: "{{ speedtest_command }}"
+      ansible.builtin.shell: |
+        if command -v speedtest >/dev/null 2>&1; then
+          speedtest --accept-license --accept-gdpr --format=json && exit 0
+        fi
+        if command -v speedtest-cli >/dev/null 2>&1; then
+          speedtest-cli --json && exit 0
+          speedtest-cli && exit 0
+        fi
+        exit 127
       register: speedtest_result
       changed_when: false
       failed_when: false
@@ -51,9 +49,45 @@
 
     - name: Parse text speedtest-cli output safely
       ansible.builtin.set_fact:
-        speedtest_text_download_mbps: "{{ (speedtest_result.stdout | regex_search('(?im)^Download:\\s*([0-9]+(?:\\.[0-9]+)?)\\s*Mbit/s', '\\1') | default([], true) | first) | default('') }}"
-        speedtest_text_upload_mbps: "{{ (speedtest_result.stdout | regex_search('(?im)^Upload:\\s*([0-9]+(?:\\.[0-9]+)?)\\s*Mbit/s', '\\1') | default([], true) | first) | default('') }}"
-        speedtest_text_ping_ms: "{{ (speedtest_result.stdout | regex_search('(?im):\\s*([0-9]+(?:\\.[0-9]+)?)\\s*ms\\s*$', '\\1') | default([], true) | first) | default('') }}"
+        speedtest_text_download_mbps: >-
+          {{
+            (
+              speedtest_result.stdout
+              | regex_search(
+                  '(?im)^Download:\s*([0-9]+(?:\.[0-9]+)?)\s*Mbit/s',
+                  '\1'
+                )
+              | default([], true)
+              | first
+            )
+            | default('')
+          }}
+        speedtest_text_upload_mbps: >-
+          {{
+            (
+              speedtest_result.stdout
+              | regex_search(
+                  '(?im)^Upload:\s*([0-9]+(?:\.[0-9]+)?)\s*Mbit/s',
+                  '\1'
+                )
+              | default([], true)
+              | first
+            )
+            | default('')
+          }}
+        speedtest_text_ping_ms: >-
+          {{
+            (
+              speedtest_result.stdout
+              | regex_search(
+                  '(?im):\s*([0-9]+(?:\.[0-9]+)?)\s*ms\s*$',
+                  '\1'
+                )
+              | default([], true)
+              | first
+            )
+            | default('')
+          }}
       when:
         - speedtest_json is not defined
         - speedtest_result.stdout is defined
@@ -82,7 +116,18 @@
               | round(2)
             }} GB
           speedtest_status: >-
-            {% if speedtest_path.rc != 0 %}not_installed{% elif speedtest_json is defined or speedtest_text_download_mbps | default('') | length > 0 %}ok{% else %}failed{% endif %}
+            {{
+              'not_installed'
+              if speedtest_path.rc != 0
+              else (
+                'ok'
+                if (
+                  speedtest_json is defined
+                  or speedtest_text_download_mbps | default('') | length > 0
+                )
+                else 'failed'
+              )
+            }}
           speedtest_download_mbps: >-
             {% if speedtest_json is defined %}
             {% if speedtest_json.download.bandwidth is defined %}

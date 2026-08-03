@@ -64,6 +64,7 @@
       ansible.builtin.command: "{{ compose_cmd }} pull"
       args:
         chdir: "{{ remnanode_dir }}"
+      changed_when: true
       when: compose_pull | bool
 
     - name: Пересоздать контейнеры
@@ -72,6 +73,7 @@
         {{ '--remove-orphans' if compose_remove_orphans | bool else '' }}
       args:
         chdir: "{{ remnanode_dir }}"
+      changed_when: true
 
     - name: Подождать после обновления
       ansible.builtin.pause:

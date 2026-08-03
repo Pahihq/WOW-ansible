@@ -87,7 +87,6 @@ docker_nodes:
       ansible_host: 203.0.113.21
       ansible_user: root
       monitoring_instance_name: node_pl1
-      remnanode_profile: plain
       speedtest_provider: ookla
       domain: origin.example.com, front.example.com
       ufw_client_ports_override:
@@ -151,7 +150,7 @@ python3 -m venv .venv
 | Playbook | Цели | Что делает | Пример запуска |
 | --- | --- | --- | --- |
 | `bootstrap.yml` | `all` | Базовая подготовка ОС и Docker. Не перезагружает сервер, но сообщает о необходимости reboot. | `ansible-playbook playbook/bootstrap.yml --limit node_pl1` |
-| `remnanode.yml` | `docker_nodes` | Устанавливает RemnaNode в `/opt/remnanode`. Профили: `plain` и `trojan_grpc`. | `ansible-playbook playbook/remnanode.yml --limit docker_nodes` |
+| `remnanode.yml` | `docker_nodes` | Устанавливает стандартный RemnaNode в `/opt/remnanode`. | `ansible-playbook playbook/remnanode.yml --limit docker_nodes` |
 | `ufw.yml` | `docker_nodes` | Настраивает SSH, клиентские порты и доступ панели к `NODE_PORT`; включает `deny incoming`. | `ansible-playbook playbook/ufw.yml --limit node_pl1` |
 | `monitoring.yml` | `all` | Разворачивает cAdvisor, node_exporter, vmagent и timer speedtest. | `ansible-playbook playbook/monitoring.yml --limit node_pl1` |
 | `reporting.yml` | `all` | Собирает инвентарь и speedtest в Google Sheets; вкладка по умолчанию `ansible_inventory`. | `ansible-playbook playbook/reporting.yml` |
@@ -161,16 +160,8 @@ python3 -m venv .venv
 
 ### RemnaNode
 
-В inventory выберите профиль:
-
-```yaml
-remnanode_profile: plain
-# или
-remnanode_profile: trojan_grpc
-```
-
-`trojan_grpc` дополнительно требует домен, файл
-`playbook/secrets/remnanode_secret_key` и архив `playbook/files/site.zip`.
+Playbook устанавливает единый стандартный стек RemnaNode. Для подключения ноды
+требуется файл `playbook/secrets/remnanode_secret_key`.
 Обновление без удаления неиспользуемых Docker-образов:
 
 ```bash

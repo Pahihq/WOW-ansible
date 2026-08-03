@@ -59,7 +59,7 @@
 - name: "Детект динамических портов (SSH, NODE_PORT)"
   ansible.builtin.import_tasks: detect.yml
 
-- name: "ufw | удалить устаревшие управляемые allow-правила"
+- name: "UFW | удалить устаревшие управляемые allow-правила"
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
@@ -67,7 +67,7 @@
     delete: true
   loop: "{{ ufw_managed_client_ports | difference(ufw_effective_client_ports) }}"
 
-- name: "ufw | удалить устаревшие NODE_PORT allow-правила"
+- name: "UFW | удалить устаревшие NODE_PORT allow-правила"
   community.general.ufw:
     rule: allow
     port: "{{ item.1 }}"
@@ -83,7 +83,7 @@
        | list }}
 
 # --- 1. SSH — открываем ПЕРВЫМ, до любого deny ---
-- name: "ufw | allow SSH (детектированные порты)"
+- name: "UFW | allow SSH (детектированные порты)"
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
@@ -91,7 +91,7 @@
   loop: "{{ ufw_ssh_detected_ports }}"
 
 # --- 2. Клиентские порты xray + 80/443 — всем ---
-- name: "ufw | allow клиентские порты (0.0.0.0/0)"
+- name: "UFW | allow клиентские порты (0.0.0.0/0)"
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
@@ -99,7 +99,7 @@
   loop: "{{ ufw_effective_client_ports }}"
 
 # --- 3. NODE_PORT — только с IP панели ---
-- name: "ufw | allow NODE_PORT только с IP панелей"
+- name: "UFW | allow NODE_PORT только с IP панелей"
   community.general.ufw:
     rule: allow
     port: "{{ ufw_node_port }}"
@@ -111,22 +111,22 @@
     - (ufw_node_port | default('') | string | length) > 0
 
 # --- 4. Логирование ---
-- name: "ufw | Настроить логирование"
+- name: "UFW | Настроить логирование"
   community.general.ufw:
     logging: "{{ ufw_logging }}"
 
 # --- 5. Политики по умолчанию (после всех allow!) ---
-- name: "ufw | default deny incoming"
+- name: "UFW | default deny incoming"
   community.general.ufw:
     direction: incoming
     policy: "{{ ufw_default_incoming }}"
 
-- name: "ufw | default allow outgoing"
+- name: "UFW | default allow outgoing"
   community.general.ufw:
     direction: outgoing
     policy: "{{ ufw_default_outgoing }}"
 
 # --- 6. Включить ufw (в самом конце) ---
-- name: "ufw | Включить firewall"
+- name: "UFW | Включить firewall"
   community.general.ufw:
     state: enabled

@@ -15,7 +15,6 @@ all:
       hosts:
         ci_node:
           monitoring_instance_name: ci-node
-          remnanode_profile: plain
           domain: node.example.test
           speedtest_provider: ookla
           ufw_panel_ips:

@@ -35,9 +35,20 @@
     - name: Что делаем
       ansible.builtin.debug:
         msg: >-
-          {{ 'ПРОДОЛЖАЕМ незавершённую ротацию: ' ~ cdn_state.front_domain
-             if cdn_resuming | bool
-             else 'Новая ротация' ~ (' (незавершённая ротация ' ~ (cdn_state.front_domain | default('?')) ~ ' будет брошена — вычисти её playbook/rotate_cleanup.yml)' if (cdn_state.status | default('')) == 'in_progress' else '') }}
+          {{
+            'ПРОДОЛЖАЕМ незавершённую ротацию: ' ~ cdn_state.front_domain
+            if cdn_resuming | bool
+            else (
+              'Новая ротация'
+              ~ (
+                ' (незавершённая ротация '
+                ~ (cdn_state.front_domain | default('?'))
+                ~ ' будет брошена — вычисти её playbook/rotate_cleanup.yml)'
+                if (cdn_state.status | default('')) == 'in_progress'
+                else ''
+              )
+            )
+          }}
 
     - name: Загрузка пула сигнатур
       ansible.builtin.include_vars:

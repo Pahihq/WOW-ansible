@@ -23,14 +23,12 @@ all:
           ansible_user: root
           monitoring_instance_name: node_ru1
           speedtest_provider: yandex
-          remnanode_profile: plain
           domain: node-ru1.example.com
 
         node_pl1:
           ansible_host: 203.0.113.21
           ansible_user: root
           monitoring_instance_name: node_pl1
-          remnanode_profile: plain
           #  первое имя - это основное имя, второе - CDN.
           domain: arch.example.com, edge.example.com
           # Добавить порт к стандартному UFW-профилю этого хоста.
@@ -44,4 +42,3 @@ all:
     eu_nodes:
       hosts:
         node_pl1:
-

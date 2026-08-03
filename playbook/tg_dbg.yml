@@ -1,13 +1,17 @@
 ---
-- hosts: localhost
+- name: Отладка credentials Telegram
+  hosts: localhost
   connection: local
   gather_facts: false
   tasks:
-    - ansible.builtin.slurp: { src: "{{ playbook_dir }}/secrets/telegram.env" }
+    - name: Чтение credentials Telegram
+      ansible.builtin.slurp: { src: "{{ playbook_dir }}/secrets/telegram.env" }
       register: e
       no_log: true
-    - ansible.builtin.set_fact:
+    - name: Разбор идентификаторов Telegram
+      ansible.builtin.set_fact:
         chat: "{{ (e.content | b64decode | regex_search('TELEGRAM_CHAT_ID=\"?([^\"\\n]+)', '\\1') | first) }}"
         thread: "{{ (e.content | b64decode | regex_search('TELEGRAM_THREAD_ID=\"?([^\"\\n]+)', '\\1') | default([''], true) | first) }}"
-    - ansible.builtin.debug:
+    - name: Вывод идентификаторов Telegram
+      ansible.builtin.debug:
         msg: "chat_id={{ chat }} | thread_id='{{ thread }}' | длина thread={{ thread | length }}"
