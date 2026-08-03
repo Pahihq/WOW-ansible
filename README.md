@@ -294,9 +294,12 @@ find playbook -maxdepth 1 -type f -name '*.yml' -print0 | sort -z |
 ```
 
 GitHub Actions в `.github/workflows/ansible-validate.yml` запускается на push
-и PR в `main`, не подключается к production inventory и не получает secrets.
-Проверка называется **Lint and syntax check** — её следует выбрать обязательной
-в GitHub Ruleset для `main` после первого успешного прогона.
+и PR в `main` и не подключается к production inventory. После push в `main`
+workflow отправляет итог проверки в Telegram через Repository secrets:
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` и опциональный `TELEGRAM_THREAD_ID`.
+Для PR, включая PR из форков, Telegram secrets не используются. Проверка
+называется **Lint and syntax check** — её следует выбрать обязательной в GitHub
+Ruleset для `main` после первого успешного прогона.
 
 В `.ansible-lint` исторические style-замечания временно имеют уровень warning.
 Ошибки синтаксиса, схем, отсутствующих модулей и остальные неослабленные правила

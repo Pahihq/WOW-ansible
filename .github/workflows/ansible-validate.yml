@@ -43,3 +43,39 @@ jobs:
             xargs -0 -n 1 ansible-playbook \
               --inventory tests/inventory.yml \
               --syntax-check
+
+      - name: Notify Telegram
+        if: ${{ always() && github.event_name == 'push' }}
+        continue-on-error: true
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TG_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo "Telegram secrets are not configured; skipping notification"
+            exit 0
+          fi
+
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          printf -v TEXT '%s\nRepository: %s\nBranch: %s\nActor: %s\nRun: %s' \
+            "Ansible validation: ${JOB_STATUS}" \
+            "$GITHUB_REPOSITORY" \
+            "$GITHUB_REF_NAME" \
+            "$GITHUB_ACTOR" \
+            "$RUN_URL"
+
+          CURL_ARGS=(
+            --data-urlencode "chat_id=${TG_CHAT_ID}"
+            --data-urlencode "text=${TEXT}"
+          )
+
+          if [ -n "$TG_THREAD_ID" ]; then
+            CURL_ARGS+=(--data-urlencode "message_thread_id=${TG_THREAD_ID}")
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            "${CURL_ARGS[@]}"
