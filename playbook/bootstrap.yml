@@ -263,183 +263,32 @@
   become: true
   gather_facts: true
 
-  vars:
-    ookla_armored_key_path: /tmp/ookla_speedtest-cli.gpgkey
-    ookla_keyring_path: /etc/apt/keyrings/ookla_speedtest-cli-archive-keyring.gpg
-    ookla_sources_path: /etc/apt/sources.list.d/ookla_speedtest-cli.sources
-
-    ookla_repo_os_map:
-      Debian: debian
-      Ubuntu: ubuntu
-
-    repo_codename_fallbacks: *repo_codename_fallbacks
-
   tasks:
-    - name: Определите переменные репозитория Ookla
-      ansible.builtin.set_fact:
-        ookla_repo_os: "{{ ookla_repo_os_map[ansible_distribution] }}"
-        repo_codename_candidates: "{{ ([ansible_distribution_release] + repo_codename_fallbacks[ansible_distribution]) | unique | list }}"
-
     - name: Включить и запустить nftables
       ansible.builtin.systemd:
         name: nftables
         enabled: true
         state: started
 
-    - name: Проверьте установленный пакет на наличие /usr/bin/speedtest.
-      ansible.builtin.command: dpkg-query -S /usr/bin/speedtest
-      register: speedtest_owner_check
-      changed_when: false
-      failed_when: false
-
-    - name: Удалите конфликтующий пакет дистрибутива Speedtest-cli.
+    - name: Установить snapd
       ansible.builtin.apt:
-        name: speedtest-cli
-        state: absent
-        purge: true
-      when: >
-        speedtest_owner_check.rc == 0 and
-        'speedtest-cli' in speedtest_owner_check.stdout
-
-    - name: Исправить прерванное состояние dpkg
-      ansible.builtin.command: dpkg --configure -a
-      changed_when: false
-      failed_when: false
-
-    - name: Исправить сломанные зависимости apt
-      ansible.builtin.apt:
-        state: fixed
-      failed_when: false
-
-    - name: Проверьте, установлен ли официальный пакет Ookla Speedtest.
-      ansible.builtin.command: dpkg-query -W -f='${Status}' speedtest
-      register: official_speedtest_package_check
-      changed_when: false
-      failed_when: false
-
-    - name: Найдите старые/конфликтующие файлы репозитория Ookla.
-      ansible.builtin.find:
-        paths: /etc/apt/sources.list.d
-        patterns:
-          - "ookla_speedtest-cli*.list"
-          - "ookla_speedtest-cli*.sources"
-        file_type: file
-      register: old_ookla_repo_files
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Удалите старые/конфликтующие файлы репозитория Ookla.
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: absent
-      loop: "{{ old_ookla_repo_files.files | default([]) }}"
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Удалите старые/конфликтующие брелоки Ookla.
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/apt/keyrings/ookla_speedtest-cli.asc
-        - /etc/apt/keyrings/ookla_speedtest-cli-archive-keyring.gpg
-        - /usr/share/keyrings/ookla_speedtest-cli-archive-keyring.gpg
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Очистите кеш apt после удаления конфликтующего репозитория Ookla.
-      ansible.builtin.apt:
-        clean: true
-
-    - name: Проверьте доступные репозитории Ookla
-      ansible.builtin.uri:
-        url: "https://packagecloud.io/ookla/speedtest-cli/{{ ookla_repo_os }}/dists/{{ item }}/Release"
-        method: GET
-        status_code:
-          - 200
-          - 404
-        return_content: false
-        timeout: 15
-      loop: "{{ repo_codename_candidates }}"
-      register: ookla_repo_checks
-      changed_when: false
-      failed_when: false
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Выберите первое доступное кодовое имя репозитория Ookla.
-      ansible.builtin.set_fact:
-        ookla_supported_codename: >-
-          {{
-            (
-              ookla_repo_checks.results
-              | selectattr('status', 'equalto', 200)
-              | map(attribute='item')
-              | list
-              | first
-            )
-            | default('', true)
-          }}
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Ошибка, если не найдено поддерживаемое кодовое имя репозитория Ookla.
-      ansible.builtin.fail:
-        msg: >-
-          Поддерживаемый репозиторий Ookla Speedtest не найден.
-          ОС: {{ ansible_distribution }}.
-          ОС репозитория: {{ ookla_repo_os }}.
-          Проверенные кодовые имена: {{ repo_codename_candidates | join(', ') }}.
-      when:
-        - official_speedtest_package_check.rc != 0
-        - ookla_supported_codename | length == 0
-
-    - name: Загрузите GPG-ключ Ookla packagecloud в виде бронированного файла.
-      ansible.builtin.get_url:
-        url: https://packagecloud.io/ookla/speedtest-cli/gpgkey
-        dest: "{{ ookla_armored_key_path }}"
-        owner: root
-        group: root
-        mode: "0644"
-        force: true
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Преобразование ключа Ookla GPG в бинарный брелок
-      ansible.builtin.command:
-        cmd: "gpg --dearmor -o {{ ookla_keyring_path }} {{ ookla_armored_key_path }}"
-      changed_when: true
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Установите разрешения для ключей Ookla
-      ansible.builtin.file:
-        path: "{{ ookla_keyring_path }}"
-        owner: root
-        group: root
-        mode: "0644"
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Добавить репозиторий Ookla Speedtest
-      ansible.builtin.copy:
-        dest: "{{ ookla_sources_path }}"
-        owner: root
-        group: root
-        mode: "0644"
-        content: |
-          Types: deb
-          URIs: https://packagecloud.io/ookla/speedtest-cli/{{ ookla_repo_os }}
-          Suites: {{ ookla_supported_codename }}
-          Components: main
-          Signed-By: {{ ookla_keyring_path }}
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Обновить кэш apt после добавления репозитория Ookla
-      ansible.builtin.apt:
-        update_cache: true
-      when: official_speedtest_package_check.rc != 0
-
-    - name: Установите официальный Ookla Speedtest
-      ansible.builtin.apt:
-        name: speedtest
+        name: snapd
         state: present
-      when: official_speedtest_package_check.rc != 0
+        update_cache: true
+
+    - name: Включить и запустить snapd
+      ansible.builtin.systemd:
+        name: snapd.socket
+        enabled: true
+        state: started
+
+    - name: Установить Speedtest через snap
+      ansible.builtin.command: snap install speedtest
+      args:
+        creates: /snap/bin/speedtest
 
     - name: Примите лицензию Ookla и GDPR
-      ansible.builtin.command: speedtest --accept-license --accept-gdpr
+      ansible.builtin.command: /snap/bin/speedtest --accept-license --accept-gdpr
       changed_when: false
       failed_when: false
 

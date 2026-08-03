@@ -88,11 +88,27 @@
   ansible.builtin.set_fact:
     site_backend_port: "{{ ((xo_pkg.content | b64decode | from_json).appPort | default(3000)) | int }}"
 
+# Кеш обновляется отдельной терпимой задачей. Любой сдохший сторонний репозиторий
+# на ноде валит модуль apt целиком и роняет ротацию на шаге 5 из 13: 2026-08-03
+# packagecloud отдал 402 Payment Required на ookla/speedtest-cli, и обе NL-ноды
+# встали именно здесь. Поломка базовых репозиториев никуда не денется — она
+# проявится на следующей задаче, при установке пакетов.
+- name: Обновление кеша apt (терпимо к сторонним репозиториям)
+  ansible.builtin.apt:
+    update_cache: true
+  register: xo_apt_update
+  failed_when: false
+  changed_when: false
+
+- name: Предупреждение о нерабочем репозитории на ноде
+  ansible.builtin.debug:
+    msg: "apt update с ошибкой, продолжаем: {{ xo_apt_update.msg | default('') }}"
+  when: "'Failed to update apt cache' in (xo_apt_update.msg | default(''))"
+
 - name: Установка сборочных пакетов
   ansible.builtin.apt:
     name: [build-essential, python3, curl, ca-certificates, gnupg]
     state: present
-    update_cache: true
 
 # Сайт-декой требует Node >= 18 (express@5, better-sqlite3). В старых дистрибутивах
 # apt отдаёт node 12 — npm install падает. Проверено на SW-2 (Ubuntu 22.04, node v12.22.9).
