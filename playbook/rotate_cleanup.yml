@@ -88,6 +88,24 @@
       changed_when: true
       no_log: true
 
+    - name: Удаление ресурса VK брошенной ротации
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/scripts/setup-cdn.sh"
+          - --cdn
+          - "{{ cdn_state.front_domain }}"
+          - --delete
+        chdir: "{{ playbook_dir }}/scripts"
+      environment:
+        VKCS_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+      register: cleanup_vk
+      delegate_to: localhost
+      become: false
+      changed_when: "'Удаление CDN завершено' in (cleanup_vk.stderr | default(''))"
+      when:
+        - apply | bool
+        - cdn_state.front_domain | default('') | length > 0
+
     - name: Удаление каталога сайта на ноде
       ansible.builtin.file:
         path: "/opt/remnanode/nginx/site/{{ cdn_state.origin_domain }}"
@@ -109,5 +127,5 @@
       ansible.builtin.debug:
         msg: >-
           {{ 'Вычищено: ' ~ (cdn_state.origin_domain | default('-')) ~ ' / ' ~ (cdn_state.front_domain | default('-'))
-             ~ (('. Ресурс VK ' ~ cdn_state.vk_resource_id ~ ' удали вручную в консоли VK.') if cdn_state.vk_resource_id is defined else '')
+             ~ ('. Ресурс VK удалён штатно, если был создан.')
              if apply | bool else 'Это был предпросмотр — ничего не удалено.' }}
