@@ -19,6 +19,7 @@
       ansible.builtin.include_role:
         name: cdn_state
         tasks_from: load
+        public: true
 
     - name: Проверка состояния, из которого можно удалить CDN
       ansible.builtin.assert:
