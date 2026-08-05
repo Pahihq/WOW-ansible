@@ -1,5 +1,10 @@
 # WOW Ansible
 
+![Карта playbook WOW Ansible](docs/assets/playbook-map.svg)
+
+**Операционная карта инфраструктуры WOW** — Ansible-сценарии для production
+VPN-нод, RemnaNode, наблюдаемости и жизненного цикла CDN.
+
 Ansible-репозиторий для эксплуатации Debian/Ubuntu-инфраструктуры WOW: базовая
 подготовка серверов, RemnaNode, UFW, мониторинг и отчётность, а также жизненный
 цикл CDN/xHTTP-фронтов. Последний контур управляет origin-декоями, DNS в
@@ -12,6 +17,7 @@ Cloudflare, ресурсами VK Cloud CDN, Remnawave и мониторами U
 ## Содержание
 
 - [Что здесь есть](#что-здесь-есть)
+- [Карта всех playbook](#карта-всех-playbook)
 - [Быстрый старт](#быстрый-старт)
 - [Инвентарь и группы](#инвентарь-и-группы)
 - [Секреты и локальные файлы](#секреты-и-локальные-файлы)
@@ -30,6 +36,56 @@ Cloudflare, ресурсами VK Cloud CDN, Remnawave и мониторами U
 | CDN-пул | `profile_inbounds_sync.yml`, `rotate_cdn.yml`, `panel_sync.yml`, `kuma_sync.yml` | Инбаунды CDN, ротация фронтов, Remnawave-балансер и Uptime Kuma. |
 | Восстановление | `cdn_teardown.yml`, `rotate_cleanup.yml`, `find_orphans.py`, `cdn_watchdog.py` | Штатное удаление CDN-плеча, чистка незавершённых ротаций, поиск сирот и осторожная авторотация при HTTP 451. |
 | Служебное | `test_domain.yml`, `squads_grant_slots.yml`, `tg_*.yml` | Проверка генерации доменов, выдача слотов сквадам, Telegram-диагностика. |
+
+## Карта всех playbook
+
+Все команды ниже запускаются из корня репозитория. Метки:
+<img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> —
+обычная идемпотентная операция;
+<img src="docs/assets/risk-careful.svg" width="16" height="16" alt="нужен предпросмотр"> —
+сначала предпросмотр или `--limit`;
+<img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> —
+производит заметные изменения либо удаление.
+
+### База, VPN и наблюдаемость
+
+| Playbook | Цели | Назначение | Старт |
+| --- | --- | --- | --- |
+| <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `bootstrap.yml` | `all` | Обновляет ОС, ставит Docker/Speedtest, настраивает swap, sysctl/BBR, zsh, MOTD и SSH; reboot не выполняет. | `ansible-playbook playbook/bootstrap.yml --limit node_pl1` |
+| <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `remnanode.yml` | `docker_nodes` | Устанавливает стандартный Compose-стек RemnaNode в `/opt/remnanode`. | `ansible-playbook playbook/remnanode.yml --limit node_pl1` |
+| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `ufw.yml` | `docker_nodes` | Настраивает SSH, клиентские порты и доступ панели к API, затем включает `deny incoming`. | `ansible-playbook playbook/ufw.yml --limit node_pl1` |
+| <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `monitoring.yml` | `all` | Разворачивает cAdvisor, node_exporter, vmagent и timer Speedtest. | `ansible-playbook playbook/monitoring.yml --limit node_pl1` |
+| <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `reporting.yml` | `all` | Собирает инвентарь и Speedtest, обновляет Google Sheets. | `ansible-playbook playbook/reporting.yml` |
+| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `update_remnanode.yml` | `docker_nodes` | Последовательно обновляет Compose-образы; партия по умолчанию — 3 ноды. | `ansible-playbook playbook/update_remnanode.yml --limit node_pl1 -e batch_size=1` |
+| <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `multitest.yml` | `docker_nodes` | Нагрузочный CPU/disk/network-тест одной ноды; отчёт сохраняется в `reports/multitest/`. | `ansible-playbook playbook/multitest.yml --limit node_pl1` |
+| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `site.yml` | `all` | Полный конвейер: bootstrap → RemnaNode → UFW → monitoring → reporting. | `ansible-playbook playbook/site.yml --limit node_pl1` |
+
+### CDN, xHTTP и Remnawave
+
+| Playbook | Цели | Назначение | Безопасный старт |
+| --- | --- | --- | --- |
+| <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `xhttp_nginx.yml` | `eu_nodes` | Разворачивает origin-маскировку, nginx, backend, Let's Encrypt и, если включено, VK CDN + Cloudflare CNAME. | `ansible-playbook playbook/xhttp_nginx.yml --limit node_pl1` |
+| <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `test_domain.yml` | localhost | Проверяет генератор доменов; внешние ресурсы не создаёт. | `ansible-playbook playbook/test_domain.yml` |
+| <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `rotate_cdn.yml` | `eu_nodes` | Ротирует плечо: домены → origin → DNS/VK CDN → Remnawave → балансер → Kuma. | `ansible-playbook playbook/rotate_cdn.yml --limit node_pl1 -e cdn_dry_run=true` |
+| <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `panel_sync.yml` | `eu_nodes` | Синхронизирует CDN-хосты и балансер по активным state-файлам. | `ansible-playbook playbook/panel_sync.yml --limit node_pl1` |
+| <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `kuma_sync.yml` | `eu_nodes` | Создаёт или обновляет монитор актуального CDN-фронта. | `ansible-playbook playbook/kuma_sync.yml --limit node_pl1` |
+| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `profile_inbounds_sync.yml` | localhost | Создаёт CDN_Pxx-инбаунды в профиле; push перезапускает Xray на нодах профиля. | `ansible-playbook playbook/profile_inbounds_sync.yml` |
+| <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `squads_grant_slots.yml` | localhost | Выдаёт CDN_Pxx внутренним сквадам, которым доступен эталонный `CDNVK`. | `ansible-playbook playbook/squads_grant_slots.yml` |
+| <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `node_inbounds_cleanup.yml` | `eu_nodes` | Находит лишние CDN_Pxx и снимает только неактуальные, неиспользуемые инбаунды. | `ansible-playbook playbook/node_inbounds_cleanup.yml --limit node_pl1` |
+| <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `rotate_cleanup.yml` | `eu_nodes` | Чистит DNS, VK CDN и origin брошенных ротаций; active-состояния не трогает. | `ansible-playbook playbook/rotate_cleanup.yml --limit node_pl1` |
+| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `cdn_teardown.yml` | `eu_nodes` | Штатно удаляет активное CDN-плечо, DNS, VK-ресурс, origin, Kuma и state. | `ansible-playbook playbook/cdn_teardown.yml --limit node_pl1` |
+
+### Telegram-диагностика
+
+| Playbook | Назначение | Команда |
+| --- | --- | --- |
+| `tg_test.yml` | Проверяет доставку сообщения в настроенный чат или топик. | `ansible-playbook playbook/tg_test.yml` |
+| `tg_report.yml` | Отправляет тестовый отчёт о CDN-ротации. | `ansible-playbook playbook/tg_report.yml` |
+| `tg_dbg.yml` | Выводит распознанные `chat_id` и `thread_id`; токен не показывает. | `ansible-playbook playbook/tg_dbg.yml` |
+
+> `multitest.yml` нагружает сервер. Для `apply=true`, `prune_images=true` и
+> `remnawave_allow_empty_balancer=true` всегда сначала проверьте вывод
+> предпросмотра и последствия операции.
 
 ## Быстрый старт
 
