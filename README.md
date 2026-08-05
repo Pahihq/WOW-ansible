@@ -28,7 +28,7 @@ Cloudflare, ресурсами VK Cloud CDN, Remnawave и мониторами U
 | VPN-ноды | `remnanode.yml`, `update_remnanode.yml`, `ufw.yml` | Развёртывание и обновление RemnaNode, настройка безопасного UFW. |
 | Наблюдаемость | `monitoring.yml`, `reporting.yml`, `multitest.yml` | cAdvisor, node_exporter, vmagent, speedtest-метрики, Google Sheets и нагрузочные отчёты. |
 | CDN-пул | `profile_inbounds_sync.yml`, `rotate_cdn.yml`, `panel_sync.yml`, `kuma_sync.yml` | Инбаунды CDN, ротация фронтов, Remnawave-балансер и Uptime Kuma. |
-| Восстановление | `rotate_cleanup.yml`, `find_orphans.py`, `cdn_watchdog.py` | Чистка незавершённых ротаций, поиск сирот и осторожная авторотация при HTTP 451. |
+| Восстановление | `cdn_teardown.yml`, `rotate_cleanup.yml`, `find_orphans.py`, `cdn_watchdog.py` | Штатное удаление CDN-плеча, чистка незавершённых ротаций, поиск сирот и осторожная авторотация при HTTP 451. |
 | Служебное | `test_domain.yml`, `squads_grant_slots.yml`, `tg_*.yml` | Проверка генерации доменов, выдача слотов сквадам, Telegram-диагностика. |
 
 ## Быстрый старт
@@ -237,10 +237,41 @@ VK Cloud, Remnawave и Kuma. Состояние хранится на управ
 | Синхронизировать панель | — | `ansible-playbook playbook/panel_sync.yml --limit node_pl1` создаёт/чинит CDN-хост и балансер по state-файлу. |
 | Синхронизировать Kuma | — | `ansible-playbook playbook/kuma_sync.yml --limit node_pl1` переносит монитор на актуальный фронт. |
 | Очистить брошенную ротацию | `ansible-playbook playbook/rotate_cleanup.yml --limit node_pl1` | Добавьте `-e apply=true` только после проверки списка удаляемых DNS/VK-ресурсов/каталога сайта. |
+| Удалить текущее CDN-плечо | `ansible-playbook playbook/cdn_teardown.yml --limit node_pl1` | Добавьте `-e apply=true` для удаления ресурсов, DNS, origin-каталога, хоста Remnawave и монитора Kuma. |
 
 При ручной `rotate_cdn.yml` предыдущее плечо по умолчанию остаётся включённым.
 Для авторотации `cdn_watchdog.py` устанавливает `auto_trigger=true`, и прежнее
 плечо снимается автоматически по завершении.
+
+### Штатное удаление CDN-плеча
+
+`cdn_teardown.yml` удаляет текущее плечо, описанное в
+`playbook/state/<node>.json`. В предпросмотре он показывает точные домены и
+UUID хоста, но не обращается к изменяющим API. Перед боевым запуском всегда
+проверьте этот вывод:
+
+```bash
+ansible-playbook playbook/cdn_teardown.yml --limit node_pl1
+ansible-playbook playbook/cdn_teardown.yml --limit node_pl1 -e apply=true
+```
+
+В боевом режиме сценарий удаляет UUID из балансера и хост из Remnawave, VK CDN
+resource, его CNAME в Cloudflare, A-запись origin, каталог origin на ноде,
+монитор Uptime Kuma и state-файл. Операция идемпотентна: повторный запуск
+дочищает уже частично удалённое плечо.
+
+По умолчанию нельзя удалить последнее плечо балансера — это защитит подписку от
+перехода в fallback. Если это сознательное полное отключение CDN, добавьте
+отдельный явный флаг:
+
+```bash
+ansible-playbook playbook/cdn_teardown.yml --limit node_pl1 \
+  -e apply=true -e remnawave_allow_empty_balancer=true
+```
+
+VK origin group не удаляется автоматически: группа может быть общей у нескольких
+CDN-ресурсов. После полного teardown проверьте такие группы в VK Cloud и
+удаляйте только подтверждённо неиспользуемые.
 
 ### Kuma, Telegram и watchdog
 
@@ -301,10 +332,13 @@ Ruleset для `main` после первого успешного прогон�
 
 - Не запускайте `site.yml` до подготовки всех secrets: он включает отчётность
   Google Sheets после настройки инфраструктуры.
-- Для UFW, обновлений, ротации CDN и cleanup всегда начинайте с одной ноды.
+- Для UFW, обновлений, ротации CDN, teardown и cleanup всегда начинайте с одной ноды.
 - Не передавайте токены через `-e` или командную строку: они могут попасть в
   shell history, process list или CI-логи.
 - Перед `rotate_cleanup.yml -e apply=true` сохраняйте вывод предпросмотра.
+- Перед `cdn_teardown.yml -e apply=true` сохраняйте вывод предпросмотра; флаг
+  `remnawave_allow_empty_balancer=true` используйте только для осознанного
+  отключения последнего CDN-плеча.
 - `playbook/state/`, `reports/`, `logs/` и резервные `*.bak.*` — локальные
   эксплуатационные артефакты. Храните резервную копию state-файлов вне Git.
 - Скрипты в `failover_db/` относятся к ручным процедурам failover Remnawave DB;
