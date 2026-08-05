@@ -8,6 +8,7 @@ CDN_DOMAIN=""
 ORIGIN=""
 DRY_RUN=false
 STATE_ONLY=false
+DELETE_MODE=false
 
 LAST_HTTP_CODE=""
 LAST_HTTP_BODY=""
@@ -19,6 +20,7 @@ usage() {
 
 Использование:
   setup-cdn.sh --cdn CDN_DOMAIN --origin ORIGIN [--dry-run]
+  setup-cdn.sh --cdn CDN_DOMAIN --delete [--dry-run]
 
 Обязательные параметры:
   --cdn DOMAIN              Пользовательский CDN-домен, например cdn.example.ru
@@ -28,6 +30,8 @@ usage() {
   --dry-run                 Выполнять только проверки и показать план изменений
   --state                   Ничего не менять: вывести в stdout JSON состояния ресурса
                             (found/id/status/active/sslEnabled/ssl_automated). --origin не нужен.
+  --delete                  Удалить CDN-ресурс VK и принадлежащий ему CNAME в Cloudflare.
+                            Origin group намеренно сохраняется: она может быть общей у ресурсов.
   -h, --help                Показать справку
 
 Origin-протокол всегда MATCH. CNAME и Let's Encrypt настраиваются автоматически.
@@ -671,6 +675,62 @@ upsert_cloudflare_cname() {
   expect_cloudflare_success "Обновление CNAME $CDN_DOMAIN"
 }
 
+delete_cloudflare_cname() {
+  local zone_id=$1
+  local target=$2
+
+  http_request GET \
+    "$CF_API_BASE/zones/$zone_id/dns_records?name=$CDN_DOMAIN&per_page=100" \
+    cloudflare
+  expect_cloudflare_success "Проверка CNAME $CDN_DOMAIN перед удалением"
+
+  local records count
+  records=$(jq -c --arg name "$CDN_DOMAIN" --arg target "$target" '
+    [ .result[]?
+      | select(.name == $name and .type == "CNAME")
+      | select((.content | ascii_downcase | sub("\\.$"; "")) == $target) ]
+  ' <<<"$LAST_HTTP_BODY")
+  count=$(jq 'length' <<<"$records")
+
+  if ((count == 0)); then
+    log "Принадлежащего VK CNAME для $CDN_DOMAIN нет — пропускаю"
+    return
+  fi
+
+  if $DRY_RUN; then
+    log "DRY-RUN: будут удалены CNAME-записи Cloudflare: $(jq -r '.[].id' <<<"$records" | tr '\n' ' ')"
+    return
+  fi
+
+  local record_id
+  while IFS= read -r record_id; do
+    [[ -n "$record_id" ]] || continue
+    log "Удаляю CNAME $CDN_DOMAIN (Cloudflare record $record_id)"
+    http_request DELETE "$CF_API_BASE/zones/$zone_id/dns_records/$record_id" cloudflare
+    expect_cloudflare_success "Удаление CNAME $CDN_DOMAIN"
+  done < <(jq -r '.[].id' <<<"$records")
+}
+
+delete_vk_resource() {
+  local resource=$1
+  local resource_id
+  resource_id=$(jq -r '.id // empty' <<<"$resource")
+  [[ -n "$resource_id" ]] || die "VK Cloud не вернул ID удаляемого CDN-ресурса"
+
+  if $DRY_RUN; then
+    log "DRY-RUN: будет удалён CDN-ресурс VK $CDN_DOMAIN (ID $resource_id)"
+    return
+  fi
+
+  log "Удаляю CDN-ресурс VK $CDN_DOMAIN (ID $resource_id)"
+  http_request DELETE "$VKCS_CDN_API_BASE/projects/$VKCS_PROJECT_ID/resources/$resource_id" vk
+  case "$LAST_HTTP_CODE" in
+    200|202|204) ;;
+    *) die "Удаление CDN-ресурса VK $resource_id: HTTP $LAST_HTTP_CODE: $(describe_error "$LAST_HTTP_BODY")" ;;
+  esac
+  log "CDN-ресурс удалён: ID $resource_id"
+}
+
 ensure_lets_encrypt() {
   local resource_id=$1
   local resource=$2
@@ -737,6 +797,10 @@ main() {
         STATE_ONLY=true
         shift
         ;;
+      --delete)
+        DELETE_MODE=true
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -748,8 +812,10 @@ main() {
   done
 
   [[ -n "$CDN_DOMAIN" ]] || die "Укажите --cdn"
-  # В режиме --state origin не требуется: ресурс ищется по CNAME.
-  if $STATE_ONLY && [[ -z "$ORIGIN" ]]; then
+  [[ "$STATE_ONLY" == false || "$DELETE_MODE" == false ]] ||
+    die "--state и --delete нельзя использовать вместе"
+  # В режимах --state/--delete origin не требуется: ресурс ищется по CNAME.
+  if { $STATE_ONLY || $DELETE_MODE; } && [[ -z "$ORIGIN" ]]; then
     ORIGIN="state.invalid"
   fi
   [[ -n "$ORIGIN" ]] || die "Укажите --origin"
@@ -792,6 +858,21 @@ main() {
   log "Зона Cloudflare: $zone_name ($zone_id)"
   [[ "$CDN_DOMAIN" != "$zone_name" ]] ||
     die "Корневой домен зоны не поддерживается этим CNAME-сценарием; используйте поддомен"
+
+  if $DELETE_MODE; then
+    local delete_resource
+    delete_resource=$(find_vk_resource)
+    # Сначала отзываем публичную DNS-запись, затем сам ресурс. Оба шага
+    # идемпотентны: повторный запуск дочистит прерванное удаление.
+    delete_cloudflare_cname "$zone_id" "$vk_target"
+    if [[ -n "$delete_resource" ]]; then
+      delete_vk_resource "$delete_resource"
+    else
+      log "CDN-ресурса VK для $CDN_DOMAIN нет — пропускаю"
+    fi
+    log "Удаление CDN завершено: $CDN_DOMAIN"
+    exit 0
+  fi
 
   local resource resource_id origin_group_id
   resource=$(find_vk_resource)

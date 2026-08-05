@@ -1,0 +1,22 @@
+---
+# Идемпотентно снимает монитор CDN, привязанный к ноде.
+- name: Удаление CDN-монитора из Uptime Kuma
+  ansible.builtin.command:
+    argv:
+      - "{{ kuma_venv_python }}"
+      - "{{ kuma_cli }}"
+      - delete
+      - --name
+      - "{{ kuma_monitor_name }}"
+      - --env
+      - "{{ kuma_env_file }}"
+  register: kuma_delete_res
+  delegate_to: localhost
+  become: false
+  changed_when: (kuma_delete_res.stdout | from_json).changed | default(false)
+
+- name: Результат удаления CDN-монитора
+  ansible.builtin.debug:
+    msg: >-
+      Kuma: {{ 'удалён монитор id=' ~ (kuma_delete_res.stdout | from_json).deleted
+      if (kuma_delete_res.stdout | from_json).changed else 'монитора уже не было' }}

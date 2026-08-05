@@ -55,10 +55,14 @@
 
 - name: 'ПРОВЕРКА: балансер не останется пустым'
   ansible.builtin.assert:
-    that: rw_retire_desired | length > 0
+    that: >-
+      rw_retire_desired | length > 0
+      or (remnawave_allow_empty_balancer | default(false) | bool)
     fail_msg: >-
       Отказ гасить {{ remnawave_retire_uuid }}: это последнее плечо в балансере,
-      снятие увело бы плитку в fallback (проверено 2026-08-01)
+      снятие увело бы плитку в fallback (проверено 2026-08-01).
+      Для сознательного удаления последнего CDN-плеча укажи
+      remnawave_allow_empty_balancer=true.
 
 - name: Удаление старого UUID из балансера
   ansible.builtin.uri:

@@ -1,0 +1,171 @@
+---
+# Полное штатное удаление текущего CDN-плеча ноды по файлу state.
+#
+#   предпросмотр: ansible-playbook playbook/cdn_teardown.yml --limit node_ch1
+#   удаление:     ansible-playbook playbook/cdn_teardown.yml --limit node_ch1 -e apply=true
+#
+# Если это последнее плечо балансера, добавь осознанно:
+#   -e apply=true -e remnawave_allow_empty_balancer=true
+- name: Удаление CDN-плеча
+  hosts: eu_nodes
+  gather_facts: false
+  serial: 1
+  vars:
+    apply: false
+  roles:
+    - role: remnawave
+  tasks:
+    - name: Загрузка состояния CDN ноды
+      ansible.builtin.include_role:
+        name: cdn_state
+        tasks_from: load
+
+    - name: Проверка состояния, из которого можно удалить CDN
+      ansible.builtin.assert:
+        that:
+          - cdn_state | default({}, true) | length > 0
+          - cdn_state.front_domain | default('') | length > 0
+          - cdn_state.origin_domain | default('') | length > 0
+          - cdn_state.node_ip | default('') | length > 0
+        fail_msg: >-
+          В {{ cdn_state_file }} нет полного состояния CDN. Автоматически удалять
+          ресурсы без точных доменов небезопасно.
+
+    - name: План удаления
+      ansible.builtin.debug:
+        msg:
+          - "нода: {{ inventory_hostname }}"
+          - "хост панели: {{ cdn_state.host_uuid | default('не найден в state') }}"
+          - "фронт: {{ cdn_state.front_domain }} (CNAME + ресурс VK + Kuma)"
+          - "origin: {{ cdn_state.origin_domain }} (A-запись + каталог сайта)"
+          - "режим: {{ 'УДАЛЕНИЕ' if apply | bool else 'предпросмотр; добавь -e apply=true' }}"
+
+    - name: Предпросмотр — остановка до внешних изменений
+      ansible.builtin.meta: end_host
+      when: not (apply | bool)
+
+    - name: Снятие хоста из балансера и панели
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/host_retire.yml"
+      vars:
+        remnawave_retire_uuid: "{{ cdn_state.host_uuid }}"
+      when: cdn_state.host_uuid | default('') | length > 0
+
+    - name: Удаление ресурса VK и CNAME фронта
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/scripts/setup-cdn.sh"
+          - --cdn
+          - "{{ cdn_state.front_domain }}"
+          - --delete
+        chdir: "{{ playbook_dir }}/scripts"
+      environment:
+        VKCS_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+      register: teardown_vk
+      delegate_to: localhost
+      become: false
+      changed_when: "'Удаление CDN завершено' in (teardown_vk.stderr | default(''))"
+
+    - name: Чтение credentials Cloudflare для A-записи origin
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/secrets/.env"
+      register: teardown_cf_env
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Разбор credentials Cloudflare
+      ansible.builtin.set_fact:
+        teardown_cf_token: "{{ (teardown_cf_env.content | b64decode | regex_search('CLOUDFLARE_API_TOKEN=\"?([^\"\\n]+)', '\\1') | first) }}"
+        teardown_cf_account: "{{ (teardown_cf_env.content | b64decode | regex_search('CLOUDFLARE_ACCOUNT_ID=\"?([^\"\\n]+)', '\\1') | first) }}"
+      no_log: true
+
+    - name: Поиск зоны и A-записи origin
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/zones?account.id={{ teardown_cf_account }}&per_page=50"
+        headers:
+          Authorization: "Bearer {{ teardown_cf_token }}"
+        return_content: true
+      register: teardown_cf_zones
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+
+    - name: Определение зоны origin
+      ansible.builtin.set_fact:
+        teardown_origin_zone: >-
+          {{ teardown_cf_zones.json.result
+             | selectattr('name', 'equalto', cdn_state.origin_domain.split('.')[-2:] | join('.'))
+             | list | first }}
+      no_log: true
+
+    - name: Получение A-записи origin
+      ansible.builtin.uri:
+        url: >-
+          https://api.cloudflare.com/client/v4/zones/{{ teardown_origin_zone.id
+          }}/dns_records?name={{ cdn_state.origin_domain }}&per_page=100
+        headers:
+          Authorization: "Bearer {{ teardown_cf_token }}"
+        return_content: true
+      register: teardown_origin_lookup
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+
+    - name: Отбор A-записей origin, принадлежащих этой ноде
+      ansible.builtin.set_fact:
+        teardown_origin_records: >-
+          {{ teardown_origin_lookup.json.result
+             | selectattr('type', 'equalto', 'A')
+             | selectattr('name', 'equalto', cdn_state.origin_domain)
+             | selectattr('content', 'equalto', cdn_state.node_ip)
+             | list }}
+      no_log: true
+
+    - name: Удаление A-записи origin из Cloudflare
+      ansible.builtin.uri:
+        url: >-
+          https://api.cloudflare.com/client/v4/zones/{{ teardown_origin_zone.id }}/dns_records/{{ item.id }}
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ teardown_cf_token }}"
+        status_code: [200]
+      loop: "{{ teardown_origin_records }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ item.content }}"
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      no_log: true
+
+    - name: Проверка, что не осталась неподтверждённая A-запись origin
+      ansible.builtin.assert:
+        that: >-
+          (teardown_origin_lookup.json.result | length) == (teardown_origin_records | length)
+        fail_msg: >-
+          Для {{ cdn_state.origin_domain }} найдены DNS-записи, не совпадающие
+          с ожидаемой A-записью {{ cdn_state.node_ip }}. Они не удалены; состояние
+          не будет стёрто, разберись с ними вручную.
+
+    - name: Удаление каталога origin на ноде
+      ansible.builtin.file:
+        path: "/opt/remnanode/nginx/site/{{ cdn_state.origin_domain }}"
+        state: absent
+      become: true
+
+    - name: Удаление CDN-монитора
+      ansible.builtin.include_role:
+        name: kuma
+        tasks_from: delete
+
+    - name: Удаление файла состояния CDN
+      ansible.builtin.file:
+        path: "{{ cdn_state_file }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+
+    - name: Итог удаления
+      ansible.builtin.debug:
+        msg: "CDN-плечо {{ inventory_hostname }} удалено: {{ cdn_state.front_domain }} / {{ cdn_state.origin_domain }}"
