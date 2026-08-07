@@ -8,7 +8,7 @@ VPN-нод, RemnaNode, наблюдаемости и жизненного цик
 Ansible-репозиторий для эксплуатации Debian/Ubuntu-инфраструктуры WOW: базовая
 подготовка серверов, RemnaNode, UFW, мониторинг и отчётность, а также жизненный
 цикл CDN/xHTTP-фронтов. Последний контур управляет origin-декоями, DNS в
-Cloudflare, ресурсами VK Cloud CDN, Remnawave и мониторами Uptime Kuma.
+Cloudflare, ресурсами VK Cloud CDN и Yandex Cloud CDN, Remnawave и мониторами Uptime Kuma.
 
 > Репозиторий выполняет изменения на production-хостах и во внешних API.
 > Сначала запускайте сценарий на одной ноде через `--limit`, а разрушительные
@@ -90,8 +90,8 @@ Cloudflare, ресурсами VK Cloud CDN, Remnawave и мониторами U
 ## Быстрый старт
 
 На управляющей машине требуются Python 3, Ansible, SSH-доступ и права `sudo`
-на целевых хостах. Для CDN-операций также нужны `curl`, `jq`, `bash` и Python
-зависимости локальных скриптов.
+на целевых хостах. Для CDN-операций также нужны `curl`, `jq`, `bash`; для
+Yandex Cloud дополнительно требуется установленный и авторизованный `yc` CLI.
 
 ```bash
 git clone <repository-url> WOW-ansible
@@ -170,7 +170,7 @@ eu_nodes:
 | Remnawave API | `remnawave_token` | Bearer-токен панели для синхронизации CDN-пула. |
 | vmagent | `vmagent.yml` | `vmagent_remote_write_url`, `vmagent_remote_write_username`, `vmagent_remote_write_password`. |
 | Google Sheets | `google_sheet_id`, `google_credentials.json` | ID таблицы и JSON service account. Переменные окружения `GOOGLE_SHEET_ID` и `GOOGLE_CREDENTIALS_FILE` могут заменить файлы. |
-| Cloudflare + VK Cloud | `.env` | Скопируйте `playbook/scripts/.env.example`; потребуются OpenStack/VK Cloud и Cloudflare account token с Zone Read/DNS Write. |
+| Cloudflare + CDN | `.env` | Для VK нужны OpenStack-параметры, для Yandex — `yc` CLI и `YANDEX_FOLDER_ID`; обоим нужен Cloudflare token с Zone Read/DNS Write. |
 | Uptime Kuma | `kuma.env` | `KUMA_URL`, `KUMA_USER`, `KUMA_PASS`. |
 | Telegram | `telegram.env` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`; опционально `TELEGRAM_THREAD_ID`. |
 
@@ -249,7 +249,7 @@ ufw_panel_ips:
 ## Контур CDN и xHTTP
 
 Этот набор сценариев связывает состояние в `playbook/state/<node>.json` с DNS,
-VK Cloud, Remnawave и Kuma. Состояние хранится на управляющей машине, имеет
+VK/Yandex Cloud, Remnawave и Kuma. Состояние хранится на управляющей машине, имеет
 права `0600` и не коммитится. Не удаляйте его во время активной ротации.
 
 ### Первичная подготовка
@@ -263,8 +263,29 @@ VK Cloud, Remnawave и Kuma. Состояние хранится на управ
 
    Playbook выбирает статический cover-сайт детерминированно, настраивает nginx
    в `/opt/remnanode/nginx`, получает Let's Encrypt сертификат и после успеха
-   локально запускает `scripts/setup-cdn.sh`. Если CDN временно не требуется,
+   локально запускает скрипты выбранных CDN. Если CDN временно не требуется,
    передайте `-e xhttp_cdn_setup_enabled=false`.
+
+   Провайдер выбирается через extra vars:
+
+   ```bash
+   -e cdn_provider=vk
+   -e cdn_provider=yandex
+   -e cdn_provider=both
+   ```
+
+   Для одного провайдера `domain` содержит `origin, front`. Для `both`:
+
+   ```yaml
+   domain: origin.example.com, vk.example.com, yandex.example.com
+   ```
+
+   Origin и xHTTP/inbound-профиль общие, фронт-домены независимые. В панели
+   создаются хосты `CDN-POOL <node> VK` и/или `CDN-POOL <node> YANDEX`, в Kuma —
+   мониторы `CDN_<node>_VK` и/или `CDN_<node>_YANDEX`.
+   Yandex использует существующий управляемый сертификат `wowsecure`. Скрипт
+   проверяет статус `ISSUED` и что фронт покрывается точным или wildcard SAN;
+   выпущенный сертификат переиспользуется без нового DNS challenge.
 
 3. Создайте CDN-инбаунды в конфиг-профиле Remnawave. Этот шаг может перезапустить
    Xray на всех нодах профиля, поэтому сначала используйте предпросмотр, затем
@@ -335,7 +356,7 @@ CDN-ресурсов. После полного teardown проверьте та
 
 ```bash
 .venv/bin/python playbook/scripts/kuma_cli.py list
-.venv/bin/python playbook/scripts/kuma_cli.py status --parent 18 --prefix 'CDN '
+.venv/bin/python playbook/scripts/kuma_cli.py status --parent 18 --prefix 'CDN_'
 ansible-playbook playbook/tg_test.yml
 ```
 

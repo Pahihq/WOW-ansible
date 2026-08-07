@@ -28,10 +28,12 @@ for f in os.listdir(STATE):
         for k in ('origin_domain', 'front_domain'):
             if d.get(k):
                 live.add(d[k])
+        live.update((d.get('front_domains') or {}).values())
         prev = d.get('prev') or {}
         for k in ('origin_domain', 'front_domain'):
             if prev.get(k):
                 live.add(prev[k])
+        live.update((prev.get('front_domains') or {}).values())
 
 print('в работе по файлам состояния:', len(live))
 for z in cf('/zones?per_page=50')['result']:

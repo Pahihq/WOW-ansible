@@ -1,0 +1,89 @@
+---
+- name: "{{ cdn_provider_current | upper }} | Сборка команды CDN"
+  ansible.builtin.set_fact:
+    cdn_provider_argv: >-
+      {{ [cdn_setup_scripts[cdn_provider_current], '--cdn', cdn_front_domains_new[cdn_provider_current],
+          '--origin', cdn_origin_domain_new]
+         + (['--certificate-name', yandex_cdn_certificate_name | default('wowsecure')]
+            if cdn_provider_current == 'yandex' else []) }}
+
+- name: "{{ cdn_provider_current | upper }} | Провижининг CDN"
+  ansible.builtin.command:
+    argv: "{{ cdn_provider_argv }}"
+    chdir: "{{ playbook_dir }}/scripts"
+  environment:
+    VKCS_CONFIG_PATH: "{{ cdn_provider_env_file }}"
+    YANDEX_CONFIG_PATH: "{{ cdn_provider_env_file }}"
+  register: cdn_setup_result
+  delegate_to: localhost
+  become: false
+  changed_when: >-
+    'создан' in (cdn_setup_result.stderr | lower) or
+    'создаю' in (cdn_setup_result.stderr | lower) or
+    'запускаю выпуск' in (cdn_setup_result.stderr | lower)
+
+- name: "{{ cdn_provider_current | upper }} | Ожидание ресурса и TLS"
+  ansible.builtin.command:
+    argv: ["{{ cdn_setup_scripts[cdn_provider_current] }}", --cdn,
+           "{{ cdn_front_domains_new[cdn_provider_current] }}", --state]
+    chdir: "{{ playbook_dir }}/scripts"
+  environment:
+    VKCS_CONFIG_PATH: "{{ cdn_provider_env_file }}"
+    YANDEX_CONFIG_PATH: "{{ cdn_provider_env_file }}"
+  register: cdn_provider_state
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  until: >-
+    (cdn_provider_state.stdout | from_json).found | default(false)
+    and (cdn_provider_state.stdout | from_json).sslEnabled | default(false)
+    and (cdn_provider_state.stdout | from_json).active | default(false)
+  retries: 70
+  delay: 30
+
+- name: "{{ cdn_provider_current | upper }} | Сохранение ID ресурса"
+  ansible.builtin.set_fact:
+    cdn_resource_ids: >-
+      {{ cdn_resource_ids | default({})
+         | combine({cdn_provider_current: (cdn_provider_state.stdout | from_json).id}) }}
+    cdn_certificate_ids: >-
+      {{ cdn_certificate_ids | default({})
+         | combine({cdn_provider_current:
+           ((cdn_provider_state.stdout | from_json).certificateId | default(''))}) }}
+
+- name: "{{ cdn_provider_current | upper }} | Фиксация промежуточного состояния"
+  ansible.builtin.include_role:
+    name: cdn_state
+    tasks_from: save
+  vars:
+    cdn_state_patch:
+      cdn_resource_ids: "{{ cdn_resource_ids }}"
+      certificate_ids: "{{ cdn_certificate_ids }}"
+
+- name: "{{ cdn_provider_current | upper }} | Создание хоста в панели"
+  ansible.builtin.include_tasks: ../../roles/remnawave/tasks/host_upsert.yml
+  vars:
+    cdn_front_domain: "{{ cdn_front_domains_new[cdn_provider_current] }}"
+    cdn_host_remark: "CDN-POOL {{ inventory_hostname }} {{ cdn_provider_current | upper }}"
+
+- name: "{{ cdn_provider_current | upper }} | Сохранение UUID хоста"
+  ansible.builtin.set_fact:
+    cdn_host_uuids: >-
+      {{ cdn_host_uuids | default({}) | combine({cdn_provider_current: remnawave_host_uuid}) }}
+
+- name: "{{ cdn_provider_current | upper }} | Включение хоста в балансер"
+  ansible.builtin.include_tasks: ../../roles/remnawave/tasks/balancer_join.yml
+
+- name: "{{ cdn_provider_current | upper }} | Монитор Kuma"
+  ansible.builtin.include_role:
+    name: kuma
+  vars:
+    cdn_front_domain_monitor: "{{ cdn_front_domains_new[cdn_provider_current] }}"
+    kuma_monitor_name: "CDN_{{ inventory_hostname }}_{{ cdn_provider_current | upper }}"
+
+- name: "{{ cdn_provider_current | upper }} | Сохранение имени монитора"
+  ansible.builtin.set_fact:
+    cdn_monitor_names: >-
+      {{ cdn_monitor_names | default({})
+         | combine({cdn_provider_current: 'CDN_' ~ inventory_hostname ~ '_'
+         ~ (cdn_provider_current | upper)}) }}

@@ -1,0 +1,24 @@
+---
+- name: "{{ cdn_provider_current | upper }} | Сборка команды CDN"
+  ansible.builtin.set_fact:
+    xhttp_cdn_argv: >-
+      {{ [xhttp_cdn_scripts[cdn_provider_current], '--cdn', cdn_front_domains_new[cdn_provider_current],
+          '--origin', primary_domain]
+         + (['--certificate-name', yandex_cdn_certificate_name | default('wowsecure')]
+            if cdn_provider_current == 'yandex' else []) }}
+
+- name: "{{ cdn_provider_current | upper }} | Создание CDN и DNS"
+  ansible.builtin.command:
+    argv: "{{ xhttp_cdn_argv }}"
+    chdir: "{{ xhttp_cdn_scripts[cdn_provider_current] | dirname }}"
+  environment:
+    VKCS_CONFIG_PATH: "{{ xhttp_cdn_env_file }}"
+    YANDEX_CONFIG_PATH: "{{ xhttp_cdn_env_file }}"
+  register: xhttp_cdn_setup
+  delegate_to: localhost
+  become: false
+  throttle: 1
+  changed_when: >-
+    'создаю' in (xhttp_cdn_setup.stderr | lower) or
+    'создан' in (xhttp_cdn_setup.stderr | lower) or
+    'запускаю выпуск' in (xhttp_cdn_setup.stderr | lower)

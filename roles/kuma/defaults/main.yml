@@ -6,6 +6,6 @@ kuma_env_file: "{{ playbook_dir }}/secrets/kuma.env"
 kuma_parent_group: 18
 kuma_interval: 60
 kuma_retries: 2
-# Монитор именуется по НОДЕ, а не по домену: при ротации он переезжает на новый
-# фронт, а история проверок и алерты сохраняются.
-kuma_monitor_name: "CDN {{ inventory_hostname }}"
+# Монитор именуется по ноде и провайдеру: при ротации он переезжает на новый
+# фронт своего провайдера, сохраняя историю проверок и алерты.
+kuma_monitor_name: "CDN_{{ inventory_hostname }}_{{ cdn_provider | default('VK') | upper }}"

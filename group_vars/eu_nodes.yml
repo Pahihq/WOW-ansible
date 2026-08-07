@@ -4,3 +4,8 @@
 # на EE-1 :443 занят reality-инбаундом моста, nginx там уходит в restart loop.
 cdn_provider: vk
 cdn_inbound_tag: CDNVK
+cdn_setup_scripts:
+  vk: "{{ playbook_dir }}/scripts/setup-cdn.sh"
+  yandex: "{{ playbook_dir }}/scripts/setup-yandex-cdn.sh"
+cdn_provider_env_file: "{{ playbook_dir }}/secrets/.env"
+yandex_cdn_certificate_name: wowsecure

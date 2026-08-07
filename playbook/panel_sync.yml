@@ -28,17 +28,19 @@
 
     - name: Домены и инбаунд из состояния
       ansible.builtin.set_fact:
-        cdn_front_domain: "{{ cdn_state.front_domain }}"
+        cdn_front_domains_sync: >-
+          {{ cdn_state.front_domains
+             | default({(cdn_state.cdn_provider | default('vk')): cdn_state.front_domain}) }}
         cdn_inbound_tag: "{{ cdn_state.inbound_tag }}"
 
-    - name: Создание или починка хоста CDN-фронта
-      ansible.builtin.include_tasks: ../roles/remnawave/tasks/host_upsert.yml
-
-    - name: Включение хоста в балансер
-      ansible.builtin.include_tasks: ../roles/remnawave/tasks/balancer_join.yml
+    - name: Синхронизация каждого CDN-фронта
+      ansible.builtin.include_tasks: tasks/panel_sync_provider.yml
+      loop: "{{ cdn_front_domains_sync | dict2items }}"
+      loop_control:
+        loop_var: cdn_sync_front
 
     - name: Итог
       ansible.builtin.debug:
         msg: >-
-          {{ inventory_hostname }}: фронт {{ cdn_front_domain }} →
-          хост {{ remnawave_host_uuid }} (инбаунд {{ cdn_inbound_tag }}) в балансере
+          {{ inventory_hostname }}: фронты {{ cdn_front_domains_sync }} →
+          хосты {{ cdn_sync_host_uuids }} (инбаунд {{ cdn_inbound_tag }}) в балансере

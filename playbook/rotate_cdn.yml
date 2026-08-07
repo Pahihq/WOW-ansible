@@ -1,8 +1,9 @@
 ---
-# Полная ротация CDN-фронта ноды: домены -> origin-декой -> ресурс VK -> хост в панели -> балансер.
+# Полная ротация: общий origin/profile -> один или два CDN-фронта -> панель/Kuma.
 #
 #   вхолостую:  ansible-playbook playbook/rotate_cdn.yml --limit node_ch1 -e cdn_dry_run=true
 #   боевой:     ansible-playbook playbook/rotate_cdn.yml --limit node_ch1
+#   провайдер:  -e cdn_provider=vk|yandex|both
 #
 - name: Ротация CDN-фронта
   hosts: eu_nodes
@@ -20,6 +21,15 @@
   roles:
     - role: remnawave
   tasks:
+    - name: Проверка режима CDN
+      ansible.builtin.assert:
+        that: cdn_provider in ['vk', 'yandex', 'both']
+        fail_msg: "cdn_provider должен быть vk, yandex или both"
+
+    - name: Выбор CDN-провайдеров
+      ansible.builtin.set_fact:
+        cdn_providers_selected: "{{ ['vk', 'yandex'] if cdn_provider == 'both' else [cdn_provider] }}"
+
     - name: Загрузка состояния ротации ноды
       ansible.builtin.include_role:
         name: cdn_state
@@ -108,7 +118,9 @@
     - name: Восстановление доменов из состояния
       ansible.builtin.set_fact:
         cdn_origin_domain_new: "{{ cdn_state.origin_domain }}"
-        cdn_front_domain_new: "{{ cdn_state.front_domain }}"
+        cdn_front_domains_new: >-
+          {{ cdn_state.front_domains
+             | default({(cdn_state.cdn_provider | default(cdn_provider)): cdn_state.front_domain}) }}
       when: cdn_resuming | bool
 
     # Прошлая ротация фиксируется ДО перезаписи состояния: без этого UUID старого
@@ -117,9 +129,12 @@
       ansible.builtin.set_fact:
         cdn_prev: >-
           {{ {'host_uuid': cdn_state.host_uuid | default(''),
+              'host_uuids': cdn_state.host_uuids | default({}),
               'front_domain': cdn_state.front_domain | default(''),
+              'front_domains': cdn_state.front_domains | default({}),
               'origin_domain': cdn_state.origin_domain | default(''),
               'vk_resource_id': cdn_state.vk_resource_id | default(''),
+              'cdn_resource_ids': cdn_state.cdn_resource_ids | default({}),
               'inbound_tag': cdn_state.inbound_tag | default('')}
              if ((cdn_state.status | default('')) == 'active' and not (cdn_resuming | bool))
              else {} }}
@@ -134,8 +149,10 @@
           status: in_progress
           prev: "{{ cdn_prev }}"
           started_at: "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -Iseconds')) }}"
+          cdn_provider: "{{ cdn_provider }}"
           origin_domain: "{{ cdn_origin_domain_new }}"
-          front_domain: "{{ cdn_front_domain_new }}"
+          front_domain: "{{ cdn_front_domains_new[cdn_providers_selected | first] }}"
+          front_domains: "{{ cdn_front_domains_new }}"
           node_ip: "{{ cdn_node_ip }}"
           inbound_tag: "{{ cdn_inbound_tag }}"
           path: "{{ cdn_path }}"
@@ -150,102 +167,26 @@
         name: xhttp_origin
       vars:
         primary_domain: "{{ cdn_origin_domain_new }}"
-        cdn_domain: "{{ cdn_front_domain_new }}"
+        cdn_domain: "{{ cdn_front_domains_new[cdn_providers_selected | first] }}"
         cdn_tunnel_path: "{{ cdn_path }}"
       when: not (cdn_dry_run | bool)
 
-    - name: Создание CDN-ресурса VK и CNAME фронта
-      ansible.builtin.command:
-        argv:
-          - "{{ playbook_dir }}/scripts/setup-cdn.sh"
-          - --cdn
-          - "{{ cdn_front_domain_new }}"
-          - --origin
-          - "{{ cdn_origin_domain_new }}"
-        chdir: "{{ playbook_dir }}/scripts"
-      environment:
-        VKCS_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
-      register: rot_vk
-      delegate_to: localhost
-      become: false
-      throttle: 1
-      changed_when: "'CDN-ресурс создан' in (rot_vk.stderr | default(''))"
+    - name: Создание и подключение фронтов CDN
+      ansible.builtin.include_tasks: tasks/rotate_cdn_provider.yml
+      loop: "{{ cdn_providers_selected }}"
+      loop_control:
+        loop_var: cdn_provider_current
       when: not (cdn_dry_run | bool)
 
-    # ГЕЙТ: состояние ресурса в VK, а не живой ответ фронта.
-    # Edge после выпуска LE ещё какое-то время флапает (000/200) — это нормально и
-    # проходит само. Ждать его здесь бессмысленно: доступность закрывается мониторингом.
-    - name: Ожидание готовности CDN-ресурса в VK
-      ansible.builtin.command:
-        argv:
-          - "{{ playbook_dir }}/scripts/setup-cdn.sh"
-          - --cdn
-          - "{{ cdn_front_domain_new }}"
-          - --state
-        chdir: "{{ playbook_dir }}/scripts"
-      environment:
-        VKCS_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
-      register: rot_state
-      delegate_to: localhost
-      become: false
-      changed_when: false
-      until: >-
-        (rot_state.stdout | from_json).found | default(false)
-        and (rot_state.stdout | from_json).sslEnabled | default(false)
-        and (rot_state.stdout | from_json).active | default(false)
-      retries: 70
-      delay: 30
-      when: not (cdn_dry_run | bool)
-
-    - name: 'ПРОВЕРКА: ресурс VK создан и сертификат выпущен'
-      ansible.builtin.assert:
-        that:
-          - (rot_state.stdout | from_json).status == 'active'
-          - (rot_state.stdout | from_json).sslEnabled
-        fail_msg: "VK не довёл ресурс {{ cdn_front_domain_new }} до active+ssl"
-        success_msg: >-
-          Ресурс VK {{ (rot_state.stdout | from_json).id }} готов
-          (status=active, ssl={{ (rot_state.stdout | from_json).ssl_automated }}) — идём в панель
-      when: not (cdn_dry_run | bool)
-
-    - name: Фиксация ресурса VK в состоянии
+    - name: Фиксация ресурсов CDN в состоянии
       ansible.builtin.include_role:
         name: cdn_state
         tasks_from: save
       vars:
         cdn_state_patch:
-          vk_resource_id: "{{ (rot_state.stdout | from_json).id }}"
-      when: not (cdn_dry_run | bool)
-
-    # Необязательная проба: фронт может ещё флапать, это не повод останавливать ротацию.
-    - name: Проба фронта (не блокирующая)
-      ansible.builtin.uri:
-        url: "https://{{ cdn_front_domain_new }}/"
-        return_content: false
-        status_code: [200]
-      register: rot_front
-      failed_when: false
-      changed_when: false
-      delegate_to: localhost
-      become: false
-      when: not (cdn_dry_run | bool)
-
-    - name: Состояние фронта на момент настройки панели
-      ansible.builtin.debug:
-        msg: >-
-          Фронт {{ cdn_front_domain_new }}: {{ 'отвечает 200' if (rot_front.status | default(0)) == 200
-          else 'ещё не отвечает (edge дозревает) — плечо уйдёт в балансер, следим мониторингом' }}
-      when: not (cdn_dry_run | bool)
-
-    - name: Создание хоста в панели
-      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/host_upsert.yml"
-      vars:
-        cdn_front_domain: "{{ cdn_front_domain_new }}"
-        cdn_host_remark: "CDN-POOL {{ inventory_hostname }} {{ cdn_provider | upper }}"
-      when: not (cdn_dry_run | bool)
-
-    - name: Включение хоста в балансер
-      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/balancer_join.yml"
+          cdn_resource_id: "{{ cdn_resource_ids[cdn_providers_selected | first] }}"
+          cdn_resource_ids: "{{ cdn_resource_ids }}"
+          certificate_ids: "{{ cdn_certificate_ids }}"
       when: not (cdn_dry_run | bool)
 
     # Старое плечо гасим только после того, как новое ВСТАЛО в балансер:
@@ -253,10 +194,16 @@
     - name: Гашение старого плеча
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/host_retire.yml"
       vars:
-        remnawave_retire_uuid: "{{ cdn_prev.host_uuid }}"
+        remnawave_retire_uuid: "{{ cdn_old_host_uuid }}"
+      loop: >-
+        {{ (cdn_prev.host_uuids | default({})).values() | list
+           if (cdn_prev.host_uuids | default({}) | length > 0)
+           else [cdn_prev.host_uuid | default('')] }}
+      loop_control:
+        loop_var: cdn_old_host_uuid
       when:
         - not (cdn_dry_run | bool)
-        - (cdn_prev | default({}, true)).host_uuid | default('') | length > 0
+        - cdn_old_host_uuid | length > 0
         - cdn_retire_previous | default(false) | bool
 
     - name: Пометка ротации как завершённой
@@ -266,15 +213,9 @@
       vars:
         cdn_state_patch:
           status: active
-          host_uuid: "{{ remnawave_host_uuid }}"
+          host_uuid: "{{ cdn_host_uuids[cdn_providers_selected | first] }}"
+          host_uuids: "{{ cdn_host_uuids }}"
           finished_at: "{{ lookup('pipe', 'date -Iseconds') }}"
-      when: not (cdn_dry_run | bool)
-
-    - name: Постановка нового фронта на мониторинг
-      ansible.builtin.include_role:
-        name: kuma
-      vars:
-        cdn_front_domain_monitor: "{{ cdn_front_domain_new }}"
       when: not (cdn_dry_run | bool)
 
     - name: Отчёт в Telegram
@@ -285,12 +226,12 @@
           <b>Ротация CDN выполнена</b>
           нода: <code>{{ inventory_hostname }}</code> ({{ cdn_node_ip }})
           origin: <code>{{ cdn_origin_domain_new }}</code>
-          фронт: <code>{{ cdn_front_domain_new }}</code>
+          фронты: <code>{{ cdn_front_domains_new | to_json }}</code>
           инбаунд: <code>{{ cdn_inbound_tag }}</code>  path: <code>{{ cdn_path }}</code>
-          ресурс VK: <code>{{ cdn_state.vk_resource_id | default('?') }}</code>
-          хост: <code>{{ remnawave_host_uuid }}</code>
+          ресурсы: <code>{{ cdn_resource_ids | to_json }}</code>
+          хосты панели: <code>{{ cdn_host_uuids | to_json }}</code>
           плеч в балансере: {{ (rw_tpl_after.json.response.templateJson.remnawave.injectHosts | first).selector['values'] | default([], true) | length }}
-          фронт на момент отчёта: {{ 'отвечает 200' if (rot_front.status | default(0)) == 200 else 'edge ещё дозревает' }}
+          мониторы Kuma: {{ cdn_monitor_names | to_json }}
       when: not (cdn_dry_run | bool)
 
     - name: Итог ротации
@@ -298,7 +239,7 @@
         msg:
           - "нода:    {{ inventory_hostname }} ({{ ansible_host }})"
           - "origin:  {{ cdn_origin_domain_new }}"
-          - "фронт:   {{ cdn_front_domain_new }}"
+          - "фронты:  {{ cdn_front_domains_new }}"
           - "инбаунд: {{ cdn_inbound_tag }} · path {{ cdn_path }}"
           - "сайт:    {{ cdn_site_variant | default('(dry-run)') }}"
-          - "хост:    {{ remnawave_host_uuid | default('(dry-run)') }}"
+          - "хосты:   {{ cdn_host_uuids | default('(dry-run)') }}"

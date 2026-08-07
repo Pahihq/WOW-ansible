@@ -18,8 +18,18 @@
         (cdn_state | default({}, true)) == {}
         or (cdn_state.status | default('')) != 'active'
 
-    - name: Постановка фронта на мониторинг
+    - name: Домены фронтов из состояния
+      ansible.builtin.set_fact:
+        cdn_front_domains_sync: >-
+          {{ cdn_state.front_domains
+             | default({(cdn_state.cdn_provider | default('vk')): cdn_state.front_domain}) }}
+
+    - name: Постановка фронтов на мониторинг
       ansible.builtin.include_role:
         name: kuma
       vars:
-        cdn_front_domain_monitor: "{{ cdn_state.front_domain }}"
+        cdn_front_domain_monitor: "{{ item.value }}"
+        kuma_monitor_name: "CDN_{{ inventory_hostname }}_{{ item.key | upper }}"
+      loop: "{{ cdn_front_domains_sync | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}: {{ item.value }}"

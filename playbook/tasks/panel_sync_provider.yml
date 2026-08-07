@@ -1,0 +1,14 @@
+---
+- name: "{{ cdn_sync_front.key | upper }} | Создание или починка хоста"
+  ansible.builtin.include_tasks: ../../roles/remnawave/tasks/host_upsert.yml
+  vars:
+    cdn_front_domain: "{{ cdn_sync_front.value }}"
+    cdn_host_remark: "CDN-POOL {{ inventory_hostname }} {{ cdn_sync_front.key | upper }}"
+
+- name: "{{ cdn_sync_front.key | upper }} | Включение хоста в балансер"
+  ansible.builtin.include_tasks: ../../roles/remnawave/tasks/balancer_join.yml
+
+- name: "{{ cdn_sync_front.key | upper }} | Сохранение UUID"
+  ansible.builtin.set_fact:
+    cdn_sync_host_uuids: >-
+      {{ cdn_sync_host_uuids | default({}) | combine({cdn_sync_front.key: remnawave_host_uuid}) }}

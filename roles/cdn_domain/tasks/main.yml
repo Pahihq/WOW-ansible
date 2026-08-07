@@ -1,11 +1,11 @@
 ---
 # Генерирует пару свежих доменов и заводит A-запись origin в Cloudflare.
-# Выход: cdn_origin_domain_new, cdn_front_domain_new
+# Выход: cdn_origin_domain_new, cdn_front_domains_new (provider -> domain)
 #
 # Оба — СЕРОЕ облачко (proxied: false). Оранжевое терминирует TLS и ломает
 # и Reality, и CDN-фронтинг.
 #
-# CNAME фронта здесь НЕ создаётся: цель отдаёт VK после создания ресурса (setup-cdn.sh).
+# CNAME фронтов здесь НЕ создаются: цели отдают CDN-провайдеры.
 
 - name: Чтение credentials Cloudflare
   ansible.builtin.slurp:
@@ -112,14 +112,30 @@
 - name: Генерация кандидатов
   ansible.builtin.set_fact:
     cdn_origin_zone: "{{ cf_usable_zones | random }}"
-    cdn_front_zone: "{{ cf_usable_zones | random }}"
     cdn_origin_label: "{{ cdn_free_origin_words | random }}{{ 100 | random(start=10) }}"
-    cdn_front_label: "{{ cdn_free_front_words | random }}-{{ cdn_free_front_suffix | random }}{{ 100 | random(start=10) }}"
 
-- name: Сборка полных имён
+- name: Сборка origin-домена
   ansible.builtin.set_fact:
     cdn_origin_domain_new: "{{ cdn_origin_label }}.{{ cdn_origin_zone.name }}"
-    cdn_front_domain_new: "{{ cdn_front_label }}.{{ cdn_front_zone.name }}"
+
+- name: Генерация фронта для каждого выбранного провайдера
+  ansible.builtin.include_tasks: front.yml
+  loop: "{{ cdn_providers_selected | default([cdn_provider | default('vk')]) }}"
+  loop_control:
+    loop_var: cdn_front_provider
+
+- name: Проверка уникальности фронтов
+  ansible.builtin.assert:
+    that: cdn_front_domains_new.values() | list | unique | length == cdn_front_domains_new | length
+    fail_msg: "Для провайдеров выпал одинаковый фронт-домен — перезапусти ротацию"
+
+- name: Сборка списка DNS-кандидатов
+  ansible.builtin.set_fact:
+    cdn_dns_candidates: >-
+      {{ cdn_dns_candidates
+         | default([{'zone': cdn_origin_zone, 'name': cdn_origin_domain_new}])
+         + [{'zone': cdn_front_zones_new[item], 'name': cdn_front_domains_new[item]}] }}
+  loop: "{{ cdn_providers_selected | default([cdn_provider | default('vk')]) }}"
 
 - name: Проверка, что имена ещё не заняты
   ansible.builtin.uri:
@@ -131,9 +147,7 @@
   until: cf_existing.status == 200
   retries: 10
   delay: 6
-  loop:
-    - { zone: "{{ cdn_origin_zone }}", name: "{{ cdn_origin_domain_new }}" }
-    - { zone: "{{ cdn_front_zone }}", name: "{{ cdn_front_domain_new }}" }
+  loop: "{{ cdn_dns_candidates }}"
   loop_control:
     label: "{{ item.name }}"
     # Два запроса подряд в один и тот же edge CF иногда ловят обрыв на переподключении.
@@ -194,5 +208,5 @@
   ansible.builtin.debug:
     msg:
       - "origin: {{ cdn_origin_domain_new }} -> A {{ cdn_node_ip }} (серое облачко)"
-      - "фронт:  {{ cdn_front_domain_new }} (CNAME появится после создания ресурса VK)"
+      - "фронты: {{ cdn_front_domains_new }} (CNAME создадут CDN-провайдеры)"
       - "{{ 'DRY-RUN: записи не создавались' if (cdn_dry_run | default(false) | bool) else 'A-запись создана' }}"

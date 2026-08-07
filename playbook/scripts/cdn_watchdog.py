@@ -26,7 +26,7 @@ TG_ENV = os.path.join(PLAYBOOK_DIR, 'secrets', 'telegram.env')
 VENV_PY = os.path.join(ANSIBLE_DIR, '.venv', 'bin', 'python')
 
 KUMA_GROUP = 18            # группа «💫CDN + БС»
-MONITOR_PREFIX = 'CDN '    # монитор именуется по НОДЕ: «CDN node_ch1»
+MONITOR_PREFIX = 'CDN_'    # CDN_node_ch1_VK / CDN_node_ch1_YANDEX
 
 # Точка обзора из РФ: 451 отдаёт ТСПУ, из ЕС его не видно.
 # Это та же московская машина, на которой живёт сама Kuma (ru_monitoring1).
@@ -165,9 +165,9 @@ def rotation_running():
     return out.returncode == 0
 
 
-def fire_rotation(node, dry):
+def fire_rotation(node, provider_mode, dry):
     cmd = ['ansible-playbook', 'playbook/rotate_cdn.yml', '--limit', node,
-           '-e', 'auto_trigger=true']
+           '-e', 'auto_trigger=true', '-e', 'cdn_provider=%s' % provider_mode]
     if dry:
         log('ЗАПУСК (dry-run, не выполняю): %s' % ' '.join(cmd))
         return True, 'dry-run'
@@ -201,7 +201,9 @@ def main():
 
     for m in monitors:
         node, front = m['node'], m['front']
-        rec = wd.setdefault(node, {'strikes': 0, 'last_rotation': 0, 'last_alert': 0,
+        provider = m.get('provider') or 'vk'
+        rec_key = '%s:%s' % (node, provider)
+        rec = wd.setdefault(rec_key, {'strikes': 0, 'last_rotation': 0, 'last_alert': 0,
                                    'first_451': 0})
         st = node_state(node)
 
@@ -218,9 +220,10 @@ def main():
 
         # Ротация ноды не завершена или монитор ещё не переехал на новый фронт —
         # состояние противоречиво, решений не принимаем.
-        if (st.get('status') != 'active') or (st.get('front_domain') != front):
-            log('%s: пропуск — состояние %s, фронт в state=%s, в мониторе=%s'
-                % (node, st.get('status'), st.get('front_domain'), front))
+        state_front = (st.get('front_domains') or {}).get(provider, st.get('front_domain'))
+        if (st.get('status') != 'active') or (state_front != front):
+            log('%s/%s: пропуск — состояние %s, фронт в state=%s, в мониторе=%s'
+                % (node, provider, st.get('status'), state_front, front))
             continue
 
         fresh = age_minutes(st.get('finished_at'))
@@ -309,7 +312,7 @@ def main():
         rec['strikes'] = 0
         rec['first_451'] = 0
         save_wd(wd)                      # фиксируем ДО запуска: падение не должно снять cooldown
-        ok, tail = fire_rotation(node, a.dry_run)
+        ok, tail = fire_rotation(node, st.get('cdn_provider') or provider, a.dry_run)
         fired.append(node)
         if not ok:
             telegram('<b>Авторотация упала</b>\nнода: <code>%s</code>\n'

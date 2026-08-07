@@ -7,7 +7,19 @@
     - ../group_vars/xhttp_nodes.yml
 
   pre_tasks:
-    - name: Проверка локального файла настроек VK Cloud CDN
+    - name: Проверка режима CDN
+      ansible.builtin.assert:
+        that: (cdn_provider | default('vk')) in ['vk', 'yandex', 'both']
+        fail_msg: "cdn_provider должен быть vk, yandex или both"
+      when: xhttp_cdn_setup_enabled | bool
+
+    - name: Выбор CDN-провайдеров
+      ansible.builtin.set_fact:
+        cdn_providers_selected: >-
+          {{ ['vk', 'yandex'] if (cdn_provider | default('vk')) == 'both'
+             else [cdn_provider | default('vk')] }}
+
+    - name: Проверка локального файла настроек CDN
       ansible.builtin.stat:
         path: "{{ xhttp_cdn_env_file }}"
       register: xhttp_cdn_env
@@ -16,14 +28,14 @@
       run_once: true
       when: xhttp_cdn_setup_enabled | bool
 
-    - name: Остановка при отсутствии локального .env для VK Cloud CDN
+    - name: Остановка при отсутствии локального .env для CDN
       ansible.builtin.assert:
         that:
           - xhttp_cdn_env.stat.exists | default(false)
           - xhttp_cdn_env.stat.isreg | default(false)
         fail_msg: >-
           Создайте {{ xhttp_cdn_env_file }} из .env.example и заполните
-          параметры VK Cloud и Cloudflare. Домены в .env указывать не нужно.
+          параметры VK/Yandex Cloud и Cloudflare. Домены в .env указывать не нужно.
       delegate_to: localhost
       become: false
       run_once: true
@@ -45,9 +57,12 @@
           - -c
           - >-
             bash -n "$1" && command -v curl >/dev/null &&
-            command -v jq >/dev/null
+            command -v jq >/dev/null &&
+            { [ "$2" != yandex ] || command -v yc >/dev/null; }
           - _
-          - "{{ xhttp_cdn_script }}"
+          - "{{ xhttp_cdn_scripts[item] }}"
+          - "{{ item }}"
+      loop: "{{ cdn_providers_selected }}"
       delegate_to: localhost
       become: false
       run_once: true
@@ -73,9 +88,14 @@
     - name: Проверка обязательных переменных инвентаря
       ansible.builtin.assert:
         that:
-          - domain is defined and domain | split(',') | length == 2
+          - domain is defined
+          - >-
+            domain | split(',') | length ==
+            (3 if (cdn_provider | default('vk')) == 'both' else 2)
           - certbot_email is defined and certbot_email | length > 0
-        fail_msg: Укажите domain в инвентаре в формате 'primary.example.com, cdn.example.com'.
+        fail_msg: >-
+          Для одного провайдера: 'origin.example.com, cdn.example.com'.
+          Для both: 'origin.example.com, vk.example.com, yandex.example.com'.
 
     - name: Разбор основного и CDN-доменов
       ansible.builtin.set_fact:
@@ -84,6 +104,10 @@
     - name: Настройка доменов для nginx и Certbot
       ansible.builtin.set_fact:
         primary_domain: "{{ domain_names[0] }}"
+        cdn_front_domains_new: >-
+          {{ {'vk': domain_names[1], 'yandex': domain_names[2]}
+             if (cdn_provider | default('vk')) == 'both'
+             else {(cdn_providers_selected | first): domain_names[1]} }}
         cdn_domain: "{{ domain_names[1] }}"
 
     - name: Детерминированный выбор уникального сайта для ноды
@@ -254,27 +278,11 @@
     - name: Применение отложенных перезапусков перед настройкой CDN
       ansible.builtin.meta: flush_handlers
 
-    - name: Создание VK Cloud CDN и CNAME Cloudflare для доменов ноды
-      ansible.builtin.command:
-        argv:
-          - "{{ xhttp_cdn_script }}"
-          - --cdn
-          - "{{ cdn_domain }}"
-          - --origin
-          - "{{ primary_domain }}"
-        chdir: "{{ xhttp_cdn_script | dirname }}"
-      environment:
-        VKCS_CONFIG_PATH: "{{ xhttp_cdn_env_file }}"
-      register: xhttp_cdn_setup
-      delegate_to: localhost
-      become: false
-      throttle: 1
-      changed_when: >-
-        'Создаю origin group' in (xhttp_cdn_setup.stderr | default('')) or
-        'CDN-ресурс создан' in (xhttp_cdn_setup.stderr | default('')) or
-        'Создаю CNAME' in (xhttp_cdn_setup.stderr | default('')) or
-        'Обновляю CNAME' in (xhttp_cdn_setup.stderr | default('')) or
-        'Запускаю выпуск' in (xhttp_cdn_setup.stderr | default(''))
+    - name: Создание выбранных CDN и CNAME Cloudflare
+      ansible.builtin.include_tasks: tasks/xhttp_cdn_provider.yml
+      loop: "{{ cdn_providers_selected }}"
+      loop_control:
+        loop_var: cdn_provider_current
       when: xhttp_cdn_setup_enabled | bool
 
   handlers:

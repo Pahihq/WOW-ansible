@@ -38,5 +38,8 @@ xray_proxy_pass: http://127.0.0.1:10085
 # успешного развёртывания xHTTP-ноды. Домены берутся из inventory, секреты и
 # остальные параметры — только из playbook/scripts/.env.
 xhttp_cdn_setup_enabled: true
-xhttp_cdn_script: "{{ playbook_dir }}/scripts/setup-cdn.sh"
+xhttp_cdn_scripts:
+  vk: "{{ playbook_dir }}/scripts/setup-cdn.sh"
+  yandex: "{{ playbook_dir }}/scripts/setup-yandex-cdn.sh"
 xhttp_cdn_env_file: "{{ playbook_dir }}/secrets/.env"
+yandex_cdn_certificate_name: wowsecure

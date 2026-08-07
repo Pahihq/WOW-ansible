@@ -1,0 +1,14 @@
+---
+- name: "{{ cdn_front_provider | upper }} | Генерация фронт-домена"
+  ansible.builtin.set_fact:
+    cdn_front_zone_current: "{{ cf_usable_zones | random }}"
+    cdn_front_label_current: >-
+      {{ cdn_free_front_words | random }}-{{ cdn_free_front_suffix | random }}{{ 100 | random(start=10) }}
+
+- name: "{{ cdn_front_provider | upper }} | Сохранение фронт-домена"
+  ansible.builtin.set_fact:
+    cdn_front_domains_new: >-
+      {{ cdn_front_domains_new | default({})
+         | combine({cdn_front_provider: cdn_front_label_current ~ '.' ~ cdn_front_zone_current.name}) }}
+    cdn_front_zones_new: >-
+      {{ cdn_front_zones_new | default({}) | combine({cdn_front_provider: cdn_front_zone_current}) }}

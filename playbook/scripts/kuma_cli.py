@@ -5,9 +5,9 @@ REST API для мониторов в Kuma 2.x нет — только socket.io
 Учётка берётся из playbook/secrets/kuma.env (KUMA_URL / KUMA_USER / KUMA_PASS).
 
   kuma_cli.py list
-  kuma_cli.py upsert --name "CDN SW-2" --url https://front.example/ [--parent 18]
-  kuma_cli.py delete --name "CDN SW-2"
-  kuma_cli.py status [--parent 18] [--prefix "CDN "]   # состояние + код ответа
+  kuma_cli.py upsert --name "CDN_node1_VK" --url https://front.example/ [--parent 18]
+  kuma_cli.py delete --name "CDN_node1_VK"
+  kuma_cli.py status [--parent 18] [--prefix "CDN_"]   # состояние + код ответа
 """
 import argparse, json, os, re, sys, time
 import socketio
@@ -106,10 +106,13 @@ def do_status(monitors, heartbeats, parent, prefix):
         hbs = heartbeats.get(str(mid)) or []
         last = hbs[-1] if hbs else {}
         msg = last.get('msg') or ''
+        suffix = name[len(prefix):].strip()
+        provider_match = re.match(r'^(.*)_(VK|YANDEX)$', suffix)
         out.append({
             'monitor_id': int(mid),
             'name': name,
-            'node': name[len(prefix):].strip(),
+            'node': provider_match.group(1) if provider_match else suffix,
+            'provider': provider_match.group(2).lower() if provider_match else '',
             'url': m.get('url'),
             'front': host_of(m.get('url')),
             'active': bool(m.get('active')),
@@ -130,7 +133,7 @@ def main():
     ap.add_argument('action', choices=['list', 'upsert', 'delete', 'status'])
     ap.add_argument('--name'); ap.add_argument('--url')
     ap.add_argument('--parent', type=int, default=None)
-    ap.add_argument('--prefix', default='CDN ')
+    ap.add_argument('--prefix', default='CDN_')
     ap.add_argument('--interval', type=int, default=60)
     ap.add_argument('--retries', type=int, default=2)
     ap.add_argument('--env', default=os.path.join(os.path.dirname(__file__), '..', 'secrets', 'kuma.env'))
