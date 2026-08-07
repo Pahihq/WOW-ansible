@@ -283,6 +283,12 @@ VK/Yandex Cloud, Remnawave и Kuma. Состояние хранится на у�
    Origin и xHTTP/inbound-профиль общие, фронт-домены независимые. В панели
    создаются хосты `CDN-POOL <node> VK` и/или `CDN-POOL <node> YANDEX`, в Kuma —
    мониторы `CDN_<node>_VK` и/или `CDN_<node>_YANDEX`.
+   Если при `cdn_provider=both` найден активный state старой VK-only
+   версии (`front_domain`, `vk_resource_id`, `host_uuid`), playbook автоматически
+   принимает его как провайдера VK: сохраняет origin, фронт и CDN-ресурс,
+   генерирует только Yandex-фронт, а хост панели и монитор Kuma
+   переименовывает на месте. При падении продолжите с `-e cdn_resume=true
+   -e cdn_provider=both`.
    Yandex использует существующий управляемый сертификат `wowsecure`. Скрипт
    проверяет статус `ISSUED` и что фронт покрывается точным или wildcard SAN;
    выпущенный сертификат переиспользуется без нового DNS challenge.

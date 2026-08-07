@@ -6,6 +6,7 @@ REST API для мониторов в Kuma 2.x нет — только socket.io
 
   kuma_cli.py list
   kuma_cli.py upsert --name "CDN_node1_VK" --url https://front.example/ [--parent 18]
+                    [--rename-from "CDN node1"]
   kuma_cli.py delete --name "CDN_node1_VK"
   kuma_cli.py status [--parent 18] [--prefix "CDN_"]   # состояние + код ответа
 """
@@ -132,6 +133,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('action', choices=['list', 'upsert', 'delete', 'status'])
     ap.add_argument('--name'); ap.add_argument('--url')
+    ap.add_argument('--rename-from')
     ap.add_argument('--parent', type=int, default=None)
     ap.add_argument('--prefix', default='CDN_')
     ap.add_argument('--interval', type=int, default=60)
@@ -162,6 +164,11 @@ def main():
             sys.exit('нужен --name')
         mid, existing = find_by_name(monitors, a.name)
 
+        # Legacy-монитор переименовываем на том же ID: так сохраняются
+        # история heartbeat, uptime и привязанные уведомления.
+        if a.action == 'upsert' and existing is None and a.rename_from:
+            mid, existing = find_by_name(monitors, a.rename_from)
+
         if a.action == 'delete':
             if mid is None:
                 print(json.dumps({'changed': False, 'reason': 'нет такого монитора'}))
@@ -174,12 +181,17 @@ def main():
             sys.exit('нужен --url')
 
         if existing:
-            if existing.get('url') == a.url and existing.get('active'):
+            if (existing.get('name') == a.name and existing.get('url') == a.url
+                    and existing.get('active') and existing.get('parent') == a.parent):
                 print(json.dumps({'changed': False, 'id': mid, 'url': a.url}, ensure_ascii=False))
                 return
             mon = dict(existing)
+            mon['name'] = a.name
             mon['url'] = a.url
             mon['active'] = True
+            mon['parent'] = a.parent
+            mon['interval'] = a.interval
+            mon['maxretries'] = a.retries
             r = sio.call('editMonitor', mon, timeout=30)
             if not r.get('ok'):
                 sys.exit('Kuma: правка монитора не прошла: %s' % r.get('msg'))

@@ -80,6 +80,10 @@
   vars:
     cdn_front_domain_monitor: "{{ cdn_front_domains_new[cdn_provider_current] }}"
     kuma_monitor_name: "CDN_{{ inventory_hostname }}_{{ cdn_provider_current | upper }}"
+    kuma_monitor_rename_from: >-
+      {{ 'CDN ' ~ inventory_hostname
+         if (cdn_legacy_vk_migration | default(false) | bool)
+         and cdn_provider_current == 'vk' else '' }}
 
 - name: "{{ cdn_provider_current | upper }} | Сохранение имени монитора"
   ansible.builtin.set_fact:

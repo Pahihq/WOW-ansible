@@ -43,6 +43,16 @@
          | selectattr('name', 'in', cdn_domain_zones)
          | selectattr('status', 'equalto', 'active') | list }}
 
+- name: Исходные домены миграции
+  ansible.builtin.set_fact:
+    cdn_origin_domain_new: >-
+      {{ cdn_origin_domain_existing
+         if (cdn_reuse_existing_origin | default(false) | bool) else '' }}
+    cdn_front_domains_new: "{{ cdn_front_domains_existing | default({}) }}"
+    cdn_front_providers_generate: >-
+      {{ cdn_providers_selected | default([cdn_provider | default('vk')])
+         | difference((cdn_front_domains_existing | default({})).keys() | list) }}
+
 - name: Остановка при отсутствии зон
   ansible.builtin.assert:
     that: cf_usable_zones | length > 0
@@ -73,6 +83,25 @@
     cf_taken_names: >-
       {{ cf_all_records.results | map(attribute='json.result') | flatten
          | map(attribute='name') | join(' ') }}
+
+- name: Поиск существующего origin при миграции
+  ansible.builtin.set_fact:
+    cdn_existing_origin_records: >-
+      {{ cf_all_records.results | map(attribute='json.result') | flatten
+         | selectattr('name', 'equalto', cdn_origin_domain_new) | list }}
+  when: cdn_reuse_existing_origin | default(false) | bool
+
+- name: Проверка существующего origin при миграции
+  ansible.builtin.assert:
+    that:
+      - cdn_existing_origin_records | length == 1
+      - cdn_existing_origin_records[0].type == 'A'
+      - cdn_existing_origin_records[0].content == cdn_node_ip
+      - not (cdn_existing_origin_records[0].proxied | bool)
+    fail_msg: >-
+      Origin {{ cdn_origin_domain_new }} из legacy state отсутствует или не совпадает
+      с A {{ cdn_node_ip }} без Cloudflare Proxy; рабочий VK не изменён.
+  when: cdn_reuse_existing_origin | default(false) | bool
 
 # Курируемые списки кончаются: каждая ротация сжигает слово навсегда. Синтез из слогов
 # добавляет сотни вариантов в том же духе, поэтому словарь не исчерпывается.
@@ -113,14 +142,16 @@
   ansible.builtin.set_fact:
     cdn_origin_zone: "{{ cf_usable_zones | random }}"
     cdn_origin_label: "{{ cdn_free_origin_words | random }}{{ 100 | random(start=10) }}"
+  when: not (cdn_reuse_existing_origin | default(false) | bool)
 
 - name: Сборка origin-домена
   ansible.builtin.set_fact:
     cdn_origin_domain_new: "{{ cdn_origin_label }}.{{ cdn_origin_zone.name }}"
+  when: not (cdn_reuse_existing_origin | default(false) | bool)
 
 - name: Генерация фронта для каждого выбранного провайдера
   ansible.builtin.include_tasks: front.yml
-  loop: "{{ cdn_providers_selected | default([cdn_provider | default('vk')]) }}"
+  loop: "{{ cdn_front_providers_generate }}"
   loop_control:
     loop_var: cdn_front_provider
 
@@ -129,13 +160,18 @@
     that: cdn_front_domains_new.values() | list | unique | length == cdn_front_domains_new | length
     fail_msg: "Для провайдеров выпал одинаковый фронт-домен — перезапусти ротацию"
 
-- name: Сборка списка DNS-кандидатов
+- name: Начальный список DNS-кандидатов
+  ansible.builtin.set_fact:
+    cdn_dns_candidates: >-
+      {{ [{'zone': cdn_origin_zone, 'name': cdn_origin_domain_new}]
+         if not (cdn_reuse_existing_origin | default(false) | bool) else [] }}
+
+- name: Добавление фронтов в DNS-кандидаты
   ansible.builtin.set_fact:
     cdn_dns_candidates: >-
       {{ cdn_dns_candidates
-         | default([{'zone': cdn_origin_zone, 'name': cdn_origin_domain_new}])
          + [{'zone': cdn_front_zones_new[item], 'name': cdn_front_domains_new[item]}] }}
-  loop: "{{ cdn_providers_selected | default([cdn_provider | default('vk')]) }}"
+  loop: "{{ cdn_front_providers_generate }}"
 
 - name: Проверка, что имена ещё не заняты
   ansible.builtin.uri:
@@ -201,7 +237,9 @@
   delegate_to: localhost
   become: false
   changed_when: cf_a_created is not skipped
-  when: not (cdn_dry_run | default(false) | bool)
+  when:
+    - not (cdn_dry_run | default(false) | bool)
+    - not (cdn_reuse_existing_origin | default(false) | bool)
   no_log: true
 
 - name: Итог генерации доменов
@@ -209,4 +247,8 @@
     msg:
       - "origin: {{ cdn_origin_domain_new }} -> A {{ cdn_node_ip }} (серое облачко)"
       - "фронты: {{ cdn_front_domains_new }} (CNAME создадут CDN-провайдеры)"
-      - "{{ 'DRY-RUN: записи не создавались' if (cdn_dry_run | default(false) | bool) else 'A-запись создана' }}"
+      - >-
+        {{ 'Origin и VK приняты из legacy state; создаётся только Yandex-фронт'
+           if (cdn_reuse_existing_origin | default(false) | bool)
+           else ('DRY-RUN: записи не создавались'
+                 if (cdn_dry_run | default(false) | bool) else 'A-запись создана') }}

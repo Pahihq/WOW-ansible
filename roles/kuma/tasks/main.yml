@@ -12,6 +12,8 @@
       - upsert
       - --name
       - "{{ kuma_monitor_name }}"
+      - --rename-from
+      - "{{ kuma_monitor_rename_from }}"
       - --url
       - "https://{{ cdn_front_domain_monitor }}/"
       - --parent

@@ -35,6 +35,25 @@
         name: cdn_state
         tasks_from: load
 
+    - name: Распознавание legacy VK для перехода на both
+      ansible.builtin.set_fact:
+        cdn_legacy_vk_migration: >-
+          {{ (cdn_state.legacy_vk_migration | default(false) | bool)
+             or (cdn_provider == 'both'
+                 and (cdn_state.status | default('')) == 'active'
+                 and cdn_state.front_domain is defined
+                 and cdn_state.origin_domain is defined
+                 and cdn_state.front_domains is not defined
+                 and (cdn_state.cdn_provider | default('vk')) == 'vk') }}
+
+    - name: План миграции legacy VK
+      ansible.builtin.debug:
+        msg: >-
+          Legacy VK будет принят без пересоздания:
+          origin {{ cdn_state.origin_domain }}, VK {{ cdn_state.front_domain }}.
+          Новым будет только фронт Yandex.
+      when: cdn_legacy_vk_migration | bool
+
     - name: Режим продолжения незавершённой ротации
       ansible.builtin.set_fact:
         cdn_resuming: >-
@@ -88,9 +107,27 @@
         cdn_slots_exist: >-
           {{ (rw_all_inbounds | map(attribute='tag') | select('match', '^CDN_P[0-9]{2}$') | list | length) > 0 }}
 
+    - name: Проверка маршрута legacy VK
+      ansible.builtin.assert:
+        that:
+          - cdn_state.inbound_tag | default('') | length > 0
+          - cdn_state.path | default('') | length > 0
+        fail_msg: >-
+          Legacy state не содержит inbound_tag/path; автоматическая
+          миграция остановлена, чтобы не переключить рабочий VK навслепую.
+      when: cdn_legacy_vk_migration | bool
+
+    - name: Повторное использование inbound и path legacy VK
+      ansible.builtin.set_fact:
+        cdn_inbound_tag: "{{ cdn_state.inbound_tag }}"
+        cdn_path: "{{ cdn_state.path }}"
+      when: cdn_legacy_vk_migration | bool
+
     - name: Выбор свободного слота сигнатуры
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/slot_allocate.yml"
-      when: cdn_slots_exist | bool
+      when:
+        - cdn_slots_exist | bool
+        - not (cdn_legacy_vk_migration | bool)
 
     # Пока инбаунды CDN_Pxx не заведены, ротация идёт на легаси-инбаунде:
     # домены меняются, путь остаётся прежним. Уникальные пути включатся после
@@ -101,18 +138,28 @@
         cdn_path: >-
           {{ (rw_all_inbounds | selectattr('tag', 'equalto', cdn_legacy_inbound_tag)
               | list | first).rawInbound.streamSettings.xhttpSettings.path }}
-      when: not (cdn_slots_exist | bool)
+      when:
+        - not (cdn_slots_exist | bool)
+        - not (cdn_legacy_vk_migration | bool)
 
     - name: Предупреждение про неуникальный путь
       ansible.builtin.debug:
         msg: >-
           ВНИМАНИЕ: слоты CDN_Pxx в панели отсутствуют, ротация идёт на {{ cdn_legacy_inbound_tag }}.
           Домены меняются, путь остаётся {{ cdn_path }}.
-      when: not (cdn_slots_exist | bool)
+      when:
+        - not (cdn_slots_exist | bool)
+        - not (cdn_legacy_vk_migration | bool)
 
     - name: Генерация доменов и A-записи origin
       ansible.builtin.include_role:
         name: cdn_domain
+      vars:
+        cdn_reuse_existing_origin: "{{ cdn_legacy_vk_migration }}"
+        cdn_origin_domain_existing: >-
+          {{ cdn_state.origin_domain if cdn_legacy_vk_migration else '' }}
+        cdn_front_domains_existing: >-
+          {{ {'vk': cdn_state.front_domain} if cdn_legacy_vk_migration else {} }}
       when: not (cdn_resuming | bool)
 
     - name: Восстановление доменов из состояния
@@ -136,7 +183,9 @@
               'vk_resource_id': cdn_state.vk_resource_id | default(''),
               'cdn_resource_ids': cdn_state.cdn_resource_ids | default({}),
               'inbound_tag': cdn_state.inbound_tag | default('')}
-             if ((cdn_state.status | default('')) == 'active' and not (cdn_resuming | bool))
+             if ((cdn_state.status | default('')) == 'active'
+                 and not (cdn_resuming | bool)
+                 and not (cdn_legacy_vk_migration | bool))
              else {} }}
 
     - name: Фиксация начатой ротации
@@ -150,6 +199,7 @@
           prev: "{{ cdn_prev }}"
           started_at: "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -Iseconds')) }}"
           cdn_provider: "{{ cdn_provider }}"
+          legacy_vk_migration: "{{ cdn_legacy_vk_migration }}"
           origin_domain: "{{ cdn_origin_domain_new }}"
           front_domain: "{{ cdn_front_domains_new[cdn_providers_selected | first] }}"
           front_domains: "{{ cdn_front_domains_new }}"
@@ -215,6 +265,7 @@
           status: active
           host_uuid: "{{ cdn_host_uuids[cdn_providers_selected | first] }}"
           host_uuids: "{{ cdn_host_uuids }}"
+          legacy_vk_migration: false
           finished_at: "{{ lookup('pipe', 'date -Iseconds') }}"
       when: not (cdn_dry_run | bool)
 

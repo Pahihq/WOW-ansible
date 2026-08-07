@@ -30,6 +30,9 @@
       vars:
         cdn_front_domain_monitor: "{{ item.value }}"
         kuma_monitor_name: "CDN_{{ inventory_hostname }}_{{ item.key | upper }}"
+        kuma_monitor_rename_from: >-
+          {{ 'CDN ' ~ inventory_hostname
+             if cdn_state.front_domains is not defined and item.key == 'vk' else '' }}
       loop: "{{ cdn_front_domains_sync | dict2items }}"
       loop_control:
         label: "{{ item.key }}: {{ item.value }}"

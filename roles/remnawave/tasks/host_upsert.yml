@@ -103,6 +103,7 @@
     - rw_existing_host.uuid is defined
     - >-
       rw_existing_host.xhttpExtraParams != rw_inbound_extra
+      or (rw_existing_host.remark | default('')) != rw_host_body.remark
       or rw_existing_host.isDisabled | bool
       or remnawave_cdn_host_tag not in (rw_existing_host.tags | default([]))
       or rw_existing_host.isHidden != remnawave_host_hidden

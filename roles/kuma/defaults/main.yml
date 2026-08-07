@@ -9,3 +9,4 @@ kuma_retries: 2
 # Монитор именуется по ноде и провайдеру: при ротации он переезжает на новый
 # фронт своего провайдера, сохраняя историю проверок и алерты.
 kuma_monitor_name: "CDN_{{ inventory_hostname }}_{{ cdn_provider | default('VK') | upper }}"
+kuma_monitor_rename_from: ""
