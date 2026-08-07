@@ -123,7 +123,7 @@ certificate_covers_domain() {
 }
 
 ensure_cert() {
-  local cert id status started
+  local cert id status started expected_challenges ready_challenges
   cert=$(find_cert)
   if [[ -z "$cert" ]]; then
     die "Сертификат $CERT_NAME не найден. Создайте управляемый wildcard-сертификат для DNS-зон CDN"
@@ -134,15 +134,22 @@ ensure_cert() {
   cert=$(yc_cmd certificate-manager certificate get --id "$id" --full --format json)
   status=$(jq -r '.status' <<<"$cert")
   if [[ "$status" != ISSUED ]]; then
+    expected_challenges=$(jq '[.domains[]?] | length' <<<"$cert")
     started=$SECONDS
-    while [[ $(jq '[.challenges[]? | select(.dns_challenge != null)] | length' <<<"$cert") == 0 ]]; do
-      ((SECONDS-started < 120)) || die "Certificate Manager не вернул DNS challenge"
+    ready_challenges=$(jq '[.challenges[]? | select(.dns_challenge.type == "CNAME")
+      | .dns_challenge.name] | unique | length' <<<"$cert")
+    while ((ready_challenges < expected_challenges)); do
+      ((SECONDS-started < 120)) ||
+        die "Certificate Manager не вернул CNAME challenge для всех SAN"
       sleep 5
       cert=$(yc_cmd certificate-manager certificate get --id "$id" --full --format json)
+      ready_challenges=$(jq '[.challenges[]? | select(.dns_challenge.type == "CNAME")
+        | .dns_challenge.name] | unique | length' <<<"$cert")
     done
     while IFS=$'\t' read -r t n v; do
       upsert_dns "$t" "$n" "$v" "Yandex Certificate Manager validation; keep for renewal"
-    done < <(jq -r '.challenges[] | select(.dns_challenge != null) | [.dns_challenge.type,.dns_challenge.name,.dns_challenge.value] | @tsv' <<<"$cert")
+    done < <(jq -r '.challenges[] | select(.dns_challenge.type == "CNAME")
+      | [.dns_challenge.type,.dns_challenge.name,.dns_challenge.value] | @tsv' <<<"$cert")
     started=$SECONDS
     while [[ "$status" != ISSUED ]]; do
       [[ "$status" != INVALID && "$status" != REVOKED ]] || die "Сертификат: $status"
