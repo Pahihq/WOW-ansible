@@ -25,19 +25,40 @@
       ansible.builtin.assert:
         that:
           - cdn_state | default({}, true) | length > 0
-          - cdn_state.front_domain | default('') | length > 0
           - cdn_state.origin_domain | default('') | length > 0
           - cdn_state.node_ip | default('') | length > 0
         fail_msg: >-
           В {{ cdn_state_file }} нет полного состояния CDN. Автоматически удалять
           ресурсы без точных доменов небезопасно.
 
+    - name: Нормализация фронтов, хостов и ресурсов state
+      ansible.builtin.set_fact:
+        cdn_teardown_front_domains: >-
+          {{ cdn_state.front_domains
+             | default({(cdn_state.cdn_provider | default('vk')): cdn_state.front_domain | default('')}) }}
+        cdn_teardown_host_uuids: >-
+          {{ cdn_state.host_uuids
+             | default({(cdn_state.cdn_provider | default('vk')): cdn_state.host_uuid | default('')}) }}
+        cdn_teardown_resource_ids: >-
+          {{ cdn_state.cdn_resource_ids
+             | default({(cdn_state.cdn_provider | default('vk')):
+                        cdn_state.cdn_resource_id | default(cdn_state.vk_resource_id | default(''))}) }}
+
+    - name: Проверка фронтов state
+      ansible.builtin.assert:
+        that:
+          - cdn_teardown_front_domains | length > 0
+          - cdn_teardown_front_domains.keys() | difference(['vk', 'yandex']) | length == 0
+          - cdn_teardown_front_domains.values() | select('string') | reject('equalto', '') | list | length == cdn_teardown_front_domains | length
+        fail_msg: "В {{ cdn_state_file }} нет корректных CDN-фронтов для удаления"
+
     - name: План удаления
       ansible.builtin.debug:
         msg:
           - "нода: {{ inventory_hostname }}"
-          - "хост панели: {{ cdn_state.host_uuid | default('не найден в state') }}"
-          - "фронт: {{ cdn_state.front_domain }} (CNAME + ресурс VK + Kuma)"
+          - "хосты панели: {{ cdn_teardown_host_uuids }}"
+          - "фронты: {{ cdn_teardown_front_domains }} (CNAME + CDN + Kuma)"
+          - "ресурсы CDN: {{ cdn_teardown_resource_ids }}"
           - "origin: {{ cdn_state.origin_domain }} (A-запись + каталог сайта)"
           - "режим: {{ 'УДАЛЕНИЕ' if apply | bool else 'предпросмотр; добавь -e apply=true' }}"
 
@@ -45,26 +66,23 @@
       ansible.builtin.meta: end_host
       when: not (apply | bool)
 
-    - name: Снятие хоста из балансера и панели
+    - name: Снятие хостов из балансера и панели
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/host_retire.yml"
       vars:
-        remnawave_retire_uuid: "{{ cdn_state.host_uuid }}"
-      when: cdn_state.host_uuid | default('') | length > 0
+        remnawave_retire_uuid: "{{ item.value }}"
+      loop: "{{ cdn_teardown_host_uuids | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}: {{ item.value }}"
+      when: item.value | default('') | length > 0
 
-    - name: Удаление ресурса VK и CNAME фронта
-      ansible.builtin.command:
-        argv:
-          - "{{ playbook_dir }}/scripts/setup-cdn.sh"
-          - --cdn
-          - "{{ cdn_state.front_domain }}"
-          - --delete
-        chdir: "{{ playbook_dir }}/scripts"
-      environment:
-        VKCS_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
-      register: teardown_vk
-      delegate_to: localhost
-      become: false
-      changed_when: "'Удаление CDN завершено' in (teardown_vk.stderr | default(''))"
+    - name: Удаление CDN-ресурсов и CNAME фронтов
+      ansible.builtin.include_tasks: tasks/cdn_delete_provider.yml
+      vars:
+        cdn_delete_provider: "{{ item.key }}"
+        cdn_delete_domain: "{{ item.value }}"
+      loop: "{{ cdn_teardown_front_domains | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}: {{ item.value }}"
 
     - name: Чтение credentials Cloudflare для A-записи origin
       ansible.builtin.slurp:
@@ -155,10 +173,18 @@
         state: absent
       become: true
 
-    - name: Удаление CDN-монитора
+    - name: Удаление CDN-мониторов
       ansible.builtin.include_role:
         name: kuma
         tasks_from: delete
+      vars:
+        kuma_monitor_name: >-
+          {{ ('CDN ' ~ inventory_hostname)
+             if cdn_state.front_domains is not defined and item.key == 'vk'
+             else 'CDN_' ~ inventory_hostname ~ '_' ~ (item.key | upper) }}
+      loop: "{{ cdn_teardown_front_domains | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}: {{ item.value }}"
 
     - name: Удаление файла состояния CDN
       ansible.builtin.file:
@@ -169,4 +195,4 @@
 
     - name: Итог удаления
       ansible.builtin.debug:
-        msg: "CDN-плечо {{ inventory_hostname }} удалено: {{ cdn_state.front_domain }} / {{ cdn_state.origin_domain }}"
+        msg: "CDN-плечо {{ inventory_hostname }} удалено: {{ cdn_teardown_front_domains }} / {{ cdn_state.origin_domain }}"

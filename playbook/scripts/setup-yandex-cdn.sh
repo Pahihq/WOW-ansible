@@ -6,7 +6,7 @@ CDN_API="https://cdn.api.cloud.yandex.net/cdn/v1"
 OP_API="https://operation.api.cloud.yandex.net/operations"
 CONFIG_PATH="${YANDEX_CONFIG_PATH:-$PWD/.env}"
 CDN_DOMAIN="" ORIGIN="" CERT_NAME="${YANDEX_CERTIFICATE_NAME:-wowsecure}"
-STATE_ONLY=false DRY_RUN=false TMP_DIR="" IAM_TOKEN="" FOLDER_ID=""
+STATE_ONLY=false DELETE_MODE=false DRY_RUN=false TMP_DIR="" IAM_TOKEN="" FOLDER_ID=""
 HTTP_CODE="" HTTP_BODY=""
 
 log() { printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*" >&2; }
@@ -18,6 +18,7 @@ usage() {
   cat <<'EOF'
 setup-yandex-cdn.sh --cdn DOMAIN --origin HOST [--certificate-name NAME] [--dry-run]
 setup-yandex-cdn.sh --cdn DOMAIN --state
+setup-yandex-cdn.sh --cdn DOMAIN --delete [--dry-run]
 
 Порядок: поиск wowsecure -> проверка wildcard SAN/ISSUED -> CNAME -> CDN resource.
 Новый сертификат не создаётся; DNS challenge нужен только если найденный сертификат ещё не ISSUED.
@@ -84,6 +85,20 @@ upsert_dns() {
     request PUT "$CF_API/zones/$zone_id/dns_records/$id" cf "$payload"; cf_expect "Обновление DNS $name"
     log "Обновлена DNS-запись $type $name -> $value"
   fi
+}
+
+delete_dns() {
+  local name=${1%.} zone zone_id records id
+  zone=$(find_zone "$name"); zone_id=$(jq -r '.id' <<<"$zone")
+  request GET "$CF_API/zones/$zone_id/dns_records?name=$name" cf; cf_expect "Чтение DNS $name"
+  records=$(jq -c '.result' <<<"$HTTP_BODY")
+  [[ $(jq 'length' <<<"$records") -le 1 ]] || die "Несколько DNS-записей для $name"
+  [[ $(jq 'length' <<<"$records") != 0 ]] || { log "DNS-записи $name уже нет"; return; }
+  [[ $(jq -r '.[0].type' <<<"$records") == CNAME ]] || die "$name занят не CNAME-записью; удалять небезопасно"
+  $DRY_RUN && { log "DRY-RUN DNS delete: CNAME $name"; return; }
+  id=$(jq -r '.[0].id' <<<"$records")
+  request DELETE "$CF_API/zones/$zone_id/dns_records/$id" cf; cf_expect "Удаление DNS $name"
+  log "Удалена DNS-запись CNAME $name"
 }
 
 wait_op() {
@@ -193,22 +208,43 @@ state() {
   jq -cn --argjson r "$r" --arg cs "$status" '{found:true,id:$r.id,status:(if $r.active then "active" else "disabled" end),active:$r.active,sslEnabled:($cs=="ISSUED"),certificateId:($r.sslCertificate.data.cm.id//""),certificateStatus:$cs}'
 }
 
+delete_resource() {
+  local resource op
+  resource=$(find_resource)
+  [[ -n "$resource" ]] || { log "Yandex CDN-ресурса для $CDN_DOMAIN уже нет"; return; }
+  $DRY_RUN && { log "DRY-RUN Yandex CDN delete: $(jq -r '.id' <<<"$resource")"; return; }
+  request DELETE "$CDN_API/resources/$(jq -r '.id' <<<"$resource")" yc
+  expect 200 "Удаление Yandex CDN-ресурса"
+  op=$(jq -r '.id' <<<"$HTTP_BODY")
+  [[ -n "$op" && "$op" != null ]] || die "Удаление Yandex CDN не вернуло operation id"
+  wait_op "$op"
+  log "Yandex CDN-ресурс удалён"
+}
+
 main() {
   [[ ! -f "$CONFIG_PATH" ]] || { set -a; source "$CONFIG_PATH"; set +a; }
   CERT_NAME=${YANDEX_CERTIFICATE_NAME:-$CERT_NAME}
   while (($#)); do case "$1" in
     --cdn) CDN_DOMAIN=$2; shift 2;; --origin) ORIGIN=$2; shift 2;;
     --certificate-name) CERT_NAME=$2; shift 2;; --state) STATE_ONLY=true; shift;;
+    --delete) DELETE_MODE=true; shift;;
     --dry-run) DRY_RUN=true; shift;; -h|--help) usage; exit;; *) die "Неизвестный параметр $1";; esac; done
   CDN_DOMAIN=$(normalize "$CDN_DOMAIN"); ORIGIN=$(normalize "$ORIGIN")
   [[ -n "$CDN_DOMAIN" ]] || die "Нужен --cdn"
-  $STATE_ONLY || [[ -n "$ORIGIN" ]] || die "Нужен --origin"
+  [[ "$STATE_ONLY" == false || "$DELETE_MODE" == false ]] || die "--state и --delete нельзя использовать вместе"
+  { $STATE_ONLY || $DELETE_MODE; } || [[ -n "$ORIGIN" ]] || die "Нужен --origin"
   command -v yc >/dev/null && command -v jq >/dev/null && command -v curl >/dev/null || die "Нужны yc, jq, curl"
   FOLDER_ID=${YANDEX_FOLDER_ID:-$(yc_cmd config get folder-id 2>/dev/null || true)}
   [[ -n "$FOLDER_ID" ]] || die "Не задан YANDEX_FOLDER_ID/folder-id"
   IAM_TOKEN=$(yc_cmd iam create-token); TMP_DIR=$(mktemp -d); trap cleanup EXIT
   $STATE_ONLY && { state; return; }
   : "${CLOUDFLARE_ACCOUNT_ID:?}" "${CLOUDFLARE_API_TOKEN:?}"
+  if $DELETE_MODE; then
+    delete_resource
+    delete_dns "$CDN_DOMAIN"
+    log "Удаление Yandex CDN завершено: $CDN_DOMAIN"
+    return
+  fi
   local cert target resource
   cert=$(ensure_cert)
   target=$(yc_cmd cdn resource get-provider-cname --folder-id "$FOLDER_ID" --format json | jq -r '.cname')

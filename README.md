@@ -73,7 +73,7 @@ Cloudflare, ресурсами VK Cloud CDN и Yandex Cloud CDN, Remnawave и м
 | <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `squads_grant_slots.yml` | localhost | Выдаёт CDN_Pxx внутренним сквадам, которым доступен эталонный `CDNVK`. | `ansible-playbook playbook/squads_grant_slots.yml` |
 | <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `node_inbounds_cleanup.yml` | `eu_nodes` | Находит лишние CDN_Pxx и снимает только неактуальные, неиспользуемые инбаунды. | `ansible-playbook playbook/node_inbounds_cleanup.yml --limit node_pl1` |
 | <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `rotate_cleanup.yml` | `eu_nodes` | Чистит DNS, VK CDN и origin брошенных ротаций; active-состояния не трогает. | `ansible-playbook playbook/rotate_cleanup.yml --limit node_pl1` |
-| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `cdn_teardown.yml` | `eu_nodes` | Штатно удаляет активное CDN-плечо, DNS, VK-ресурс, origin, Kuma и state. | `ansible-playbook playbook/cdn_teardown.yml --limit node_pl1` |
+| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `cdn_teardown.yml` | `eu_nodes` | Штатно удаляет активное CDN-плечо, DNS, ресурсы всех CDN-провайдеров, origin, Kuma и state. | `ansible-playbook playbook/cdn_teardown.yml --limit node_pl1` |
 
 ### Telegram-диагностика
 
@@ -319,7 +319,7 @@ VK/Yandex Cloud, Remnawave и Kuma. Состояние хранится на у�
 | Продолжить прерванную ротацию | — | `ansible-playbook playbook/rotate_cdn.yml --limit node_pl1 -e cdn_resume=true` |
 | Синхронизировать панель | — | `ansible-playbook playbook/panel_sync.yml --limit node_pl1` создаёт/чинит CDN-хост и балансер по state-файлу. |
 | Синхронизировать Kuma | — | `ansible-playbook playbook/kuma_sync.yml --limit node_pl1` переносит монитор на актуальный фронт. |
-| Очистить брошенную ротацию | `ansible-playbook playbook/rotate_cleanup.yml --limit node_pl1` | Добавьте `-e apply=true` только после проверки списка удаляемых DNS/VK-ресурсов/каталога сайта. |
+| Очистить брошенную ротацию | `ansible-playbook playbook/rotate_cleanup.yml --limit node_pl1` | Добавьте `-e apply=true` только после проверки списка удаляемых DNS/CDN-ресурсов/каталога сайта. |
 | Удалить текущее CDN-плечо | `ansible-playbook playbook/cdn_teardown.yml --limit node_pl1` | Добавьте `-e apply=true` для удаления ресурсов, DNS, origin-каталога, хоста Remnawave и монитора Kuma. |
 
 При ручной `rotate_cdn.yml` предыдущее плечо по умолчанию остаётся включённым.
@@ -338,9 +338,9 @@ ansible-playbook playbook/cdn_teardown.yml --limit node_pl1
 ansible-playbook playbook/cdn_teardown.yml --limit node_pl1 -e apply=true
 ```
 
-В боевом режиме сценарий удаляет UUID из балансера и хост из Remnawave, VK CDN
-resource, его CNAME в Cloudflare, A-запись origin, каталог origin на ноде,
-монитор Uptime Kuma и state-файл. Операция идемпотентна: повторный запуск
+В боевом режиме сценарий удаляет UUID из балансера и хост из Remnawave, CDN-ресурсы
+всех провайдеров из state, их CNAME в Cloudflare, A-запись origin, каталог origin
+на ноде, мониторы Uptime Kuma и state-файл. Операция идемпотентна: повторный запуск
 дочищает уже частично удалённое плечо.
 
 По умолчанию нельзя удалить последнее плечо балансера — это защитит подписку от

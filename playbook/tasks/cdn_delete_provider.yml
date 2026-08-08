@@ -1,0 +1,28 @@
+---
+# Удаляет CDN-ресурс и принадлежащий ему CNAME для одного провайдера.
+# Вход: cdn_delete_provider, cdn_delete_domain.
+
+- name: "{{ cdn_delete_provider | upper }} | Проверка параметров удаления"
+  ansible.builtin.assert:
+    that:
+      - cdn_delete_provider in ['vk', 'yandex']
+      - cdn_delete_domain | default('') | length > 0
+    fail_msg: "Нужны поддерживаемый CDN-провайдер и его фронт-домен"
+
+- name: "{{ cdn_delete_provider | upper }} | Удаление CDN-ресурса и CNAME"
+  ansible.builtin.command:
+    argv:
+      - "{{ playbook_dir }}/scripts/{{ 'setup-cdn.sh' if cdn_delete_provider == 'vk' else 'setup-yandex-cdn.sh' }}"
+      - --cdn
+      - "{{ cdn_delete_domain }}"
+      - --delete
+    chdir: "{{ playbook_dir }}/scripts"
+  environment:
+    VKCS_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+    YANDEX_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+  register: cdn_delete_result
+  delegate_to: localhost
+  become: false
+  changed_when: >-
+    ('Удаление CDN завершено' in (cdn_delete_result.stderr | default('')))
+    or ('Удаление Yandex CDN завершено' in (cdn_delete_result.stderr | default('')))

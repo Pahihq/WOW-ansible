@@ -23,13 +23,31 @@
       ansible.builtin.meta: end_host
       when: (cdn_state | default({}, true)) == {} or (cdn_state.status | default('')) == 'active'
 
+    - name: Нормализация фронтов и ресурсов state
+      ansible.builtin.set_fact:
+        cdn_cleanup_front_domains: >-
+          {{ cdn_state.front_domains
+             | default({(cdn_state.cdn_provider | default('vk')): cdn_state.front_domain}) }}
+        cdn_cleanup_resource_ids: >-
+          {{ cdn_state.cdn_resource_ids
+             | default({(cdn_state.cdn_provider | default('vk')):
+                        cdn_state.cdn_resource_id | default(cdn_state.vk_resource_id | default(''))}) }}
+
+    - name: Проверка фронтов state
+      ansible.builtin.assert:
+        that:
+          - cdn_cleanup_front_domains | length > 0
+          - cdn_cleanup_front_domains.keys() | difference(['vk', 'yandex']) | length == 0
+          - cdn_cleanup_front_domains.values() | select('string') | reject('equalto', '') | list | length == cdn_cleanup_front_domains | length
+        fail_msg: "State содержит пустой фронт или неподдерживаемого CDN-провайдера; очистка остановлена"
+
     - name: Что будет вычищено
       ansible.builtin.debug:
         msg:
           - "нода:    {{ inventory_hostname }} (статус {{ cdn_state.status | default('?') }})"
           - "origin:  {{ cdn_state.origin_domain | default('-') }} (A-запись + каталог сайта)"
-          - "фронты:  {{ cdn_state.front_domains | default({'legacy': cdn_state.front_domain | default('-')}) }} (CNAME)"
-          - "CDN:     {{ cdn_state.cdn_resource_ids | default({'vk': cdn_state.vk_resource_id | default('не создавался')}) }}"
+          - "фронты:  {{ cdn_cleanup_front_domains }} (CNAME)"
+          - "CDN:     {{ cdn_cleanup_resource_ids }}"
           - "режим:   {{ 'УДАЛЕНИЕ' if apply | bool else 'предпросмотр, добавь -e apply=true' }}"
 
     - name: Чтение credentials Cloudflare
@@ -68,9 +86,7 @@
       register: cl_recs
       loop: >-
         {{ ([cdn_state.origin_domain | default('')]
-            + ((cdn_state.front_domains | default({})).values() | list)
-            + ([cdn_state.front_domain] if cdn_state.front_domain is defined
-               and not cdn_state.front_domains is defined else []))
+            + (cdn_cleanup_front_domains.values() | list))
            | reject('equalto', '') | unique | list }}
       delegate_to: localhost
       become: false
@@ -94,27 +110,16 @@
       changed_when: true
       no_log: true
 
-    - name: Удаление ресурса VK брошенной ротации
-      ansible.builtin.command:
-        argv:
-          - "{{ playbook_dir }}/scripts/setup-cdn.sh"
-          - --cdn
-          - >-
-            {{ (cdn_state.front_domains | default({})).get(
-                 'vk', cdn_state.front_domain | default('')) }}
-          - --delete
-        chdir: "{{ playbook_dir }}/scripts"
-      environment:
-        VKCS_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
-      register: cleanup_vk
-      delegate_to: localhost
-      become: false
-      changed_when: "'Удаление CDN завершено' in (cleanup_vk.stderr | default(''))"
+    - name: Удаление CDN-ресурсов брошенной ротации
+      ansible.builtin.include_tasks: tasks/cdn_delete_provider.yml
+      vars:
+        cdn_delete_provider: "{{ item.key }}"
+        cdn_delete_domain: "{{ item.value }}"
+      loop: "{{ cdn_cleanup_front_domains | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}: {{ item.value }}"
       when:
         - apply | bool
-        - >-
-          ((cdn_state.front_domains | default({})).get(
-            'vk', cdn_state.front_domain | default('')) | length) > 0
 
     - name: Удаление каталога сайта на ноде
       ansible.builtin.file:
@@ -137,8 +142,5 @@
       ansible.builtin.debug:
         msg: >-
           {{ 'Вычищены DNS и сайт: ' ~ (cdn_state.origin_domain | default('-'))
-             ~ '. VK-ресурс удалён штатно, если был создан.'
-             ~ ((' Yandex-ресурс ' ~ (cdn_state.cdn_resource_ids | default({})).yandex
-                  ~ ' удали вручную.')
-                if (cdn_state.cdn_resource_ids | default({})).yandex is defined else '')
+             ~ '. CDN-ресурсы удалены для фронтов ' ~ (cdn_cleanup_front_domains | to_json) ~ '.'
              if apply | bool else 'Это был предпросмотр — ничего не удалено.' }}
