@@ -256,6 +256,16 @@
         - cdn_old_host_uuid | length > 0
         - cdn_retire_previous | default(false) | bool
 
+    # Хвосты снятого плеча: CDN-ресурсы с их CNAME и A-запись прошлого origin.
+    # Без этого шага на IP ноды копятся A-записи прошлых origin: замер 2026-08-03 —
+    # у node_ch1 три записи и 146 тиков под 451, у node_nl1 одна и 0 тиков.
+    - name: Чистка хвостов снятого плеча
+      ansible.builtin.include_tasks: tasks/retire_previous_cleanup.yml
+      when:
+        - cdn_prev | default({}) | length > 0
+        - cdn_retire_previous | default(false) | bool
+        - not (cdn_legacy_vk_migration | default(false) | bool)
+
     - name: Пометка ротации как завершённой
       ansible.builtin.include_role:
         name: cdn_state
