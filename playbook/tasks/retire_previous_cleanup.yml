@@ -1,0 +1,151 @@
+---
+# Убирает хвосты СНЯТОГО плеча: CDN-ресурсы с их CNAME и A-запись прошлого origin.
+#
+# Зачем: в штатном пути ротации единственное удаление — это хост в панели
+# (roles/remnawave/tasks/host_retire.yml). Домены и CDN-ресурсы не убирались,
+# из-за чего на IP ноды копились A-записи прошлых origin. Замер 2026-08-03:
+# у node_ch1 три A-записи и 146 тиков под 451, у node_nl1 одна и 0 тиков —
+# сожжённый домен продолжает резолвиться на живой IP и связывает старое имя
+# с новым фронтом. К 2026-08-10 накопилось 23 A-записи и 19 висячих CNAME.
+#
+# Куда включать: в playbook/rotate_cdn.yml СРАЗУ ПОСЛЕ цикла «Гашение старого плеча».
+# Не внутрь host_retire.yml: тот принимает только remnawave_retire_uuid и вызывается
+# по разу на каждого провайдера — доменов он не знает, и чистка выполнилась бы дважды.
+# Здесь же доступен cdn_prev целиком, и шаг отрабатывает один раз.
+#
+# Ресурсы и принадлежащие им CNAME снимает tasks/cdn_delete_provider.yml — общий
+# механизм обоих провайдеров (a23ae49). Своего здесь только то, чего он не делает:
+# A-запись origin.
+#
+# Вход: cdn_prev, cdn_origin_domain_new, cdn_front_domains_new, cdn_node_ip, cdn_dry_run.
+
+- name: Фронты снятого плеча по провайдерам
+  ansible.builtin.set_fact:
+    cdn_retire_front_map: >-
+      {{ cdn_prev.front_domains
+         if (cdn_prev.front_domains | default({}) | length > 0)
+         else ({'vk': cdn_prev.front_domain}
+               if (cdn_prev.front_domain | default('') | length > 0) else {}) }}
+
+# Вычитание действующих доменов обязательно: при миграции legacy VK -> both
+# origin и VK-фронт переиспользуются, и без него шаг снёс бы рабочее плечо.
+- name: Исключение действующих доменов из списка на удаление
+  ansible.builtin.set_fact:
+    cdn_retire_front_map: >-
+      {{ cdn_retire_front_map | dict2items
+         | rejectattr('value', 'in', (cdn_front_domains_new | default({})).values() | list)
+         | rejectattr('value', 'equalto', cdn_origin_domain_new)
+         | list | items2dict }}
+    cdn_retire_origin: >-
+      {{ cdn_prev.origin_domain | default('')
+         if (cdn_prev.origin_domain | default('') != cdn_origin_domain_new
+             and cdn_prev.origin_domain | default('') not in
+                 ((cdn_front_domains_new | default({})).values() | list))
+         else '' }}
+
+- name: Что будет вычищено
+  ansible.builtin.debug:
+    msg:
+      - "фронты снятого плеча: {{ cdn_retire_front_map | default({}) }}"
+      - "origin снятого плеча: {{ cdn_retire_origin | default('-', true) }}"
+      - "{{ 'DRY-RUN: ничего не удаляется' if (cdn_dry_run | default(false) | bool) else 'режим удаления' }}"
+
+# ---------------------------------------------------------------- CDN-ресурсы
+
+# Ошибка чистки не должна ронять ротацию: новое плечо к этому моменту уже стоит
+# в балансере и обслуживает клиентов. Поэтому block/rescue, а не failed_when на месте.
+- name: Удаление CDN-ресурсов снятого плеча
+  block:
+    - name: Снятие ресурса и его CNAME
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/cdn_delete_provider.yml"
+      vars:
+        cdn_delete_provider: "{{ item.key }}"
+        cdn_delete_domain: "{{ item.value }}"
+      loop: "{{ cdn_retire_front_map | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}: {{ item.value }}"
+      when: not (cdn_dry_run | default(false) | bool)
+  rescue:
+    - name: Предупреждение о неубранном ресурсе
+      ansible.builtin.debug:
+        msg: >-
+          ВНИМАНИЕ: не удалось снять CDN-ресурсы снятого плеча
+          ({{ cdn_retire_front_map | default({}) }}). Ротация не прервана — новое плечо
+          работает. Снимите вручную, иначе ресурс останется висеть в облаке.
+
+# ------------------------------------------------------------------------ DNS
+
+- name: Чтение credentials Cloudflare
+  ansible.builtin.slurp:
+    src: "{{ cdn_provider_env_file }}"
+  register: cdn_retire_env
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Разбор credentials
+  ansible.builtin.set_fact:
+    cdn_retire_cf_token: "{{ (cdn_retire_env.content | b64decode | regex_search('CLOUDFLARE_API_TOKEN=\"?([^\"\\n]+)', '\\1') | first) }}"
+    cdn_retire_cf_account: "{{ (cdn_retire_env.content | b64decode | regex_search('CLOUDFLARE_ACCOUNT_ID=\"?([^\"\\n]+)', '\\1') | first) }}"
+  no_log: true
+
+- name: Получение зон
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones?account.id={{ cdn_retire_cf_account }}&per_page=50"
+    headers: { Authorization: "Bearer {{ cdn_retire_cf_token }}" }
+    return_content: true
+  register: cdn_retire_zones
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+# Фронты ищем тоже: если снятие ресурса выше не прошло, его CNAME остался,
+# и подобрать его здесь дешевле, чем оставить висеть до ручной уборки.
+- name: Поиск DNS-записей снятого плеча
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ (cdn_retire_zones.json.result
+      | selectattr('name', 'equalto', item.split('.')[-2:] | join('.')) | list | first).id
+      }}/dns_records?name={{ item }}
+    headers: { Authorization: "Bearer {{ cdn_retire_cf_token }}" }
+    return_content: true
+  register: cdn_retire_recs
+  loop: >-
+    {{ ([cdn_retire_origin] + (cdn_retire_front_map | default({})).values() | list)
+       | reject('equalto', '') | unique | list }}
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+# Предохранитель: удаляем запись, только если её СОДЕРЖИМОЕ соответствует ожидаемому —
+# A смотрит на IP этой ноды, CNAME на edge CDN. Иначе совпадение имени с чужой
+# записью привело бы к удалению чего-то постороннего.
+- name: Удаление DNS-записей снятого плеча
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ item.1.zone_id }}/dns_records/{{ item.1.id }}"
+    method: DELETE
+    headers: { Authorization: "Bearer {{ cdn_retire_cf_token }}" }
+    status_code: [200]
+  loop: >-
+    {{ cdn_retire_recs.results | default([])
+       | subelements('json.result', skip_missing=True) }}
+  loop_control:
+    label: "{{ item.1.type }} {{ item.1.name }} -> {{ item.1.content }}"
+  when:
+    - not (cdn_dry_run | default(false) | bool)
+    - (item.1.type == 'A' and item.1.content == cdn_node_ip)
+      or (item.1.type == 'CNAME' and
+          (('vkcs.cloud' in item.1.content) or ('yccdn' in item.1.content)
+           or ('gslb' in item.1.content)))
+  delegate_to: localhost
+  become: false
+  changed_when: true
+
+- name: Итог чистки снятого плеча
+  ansible.builtin.debug:
+    msg: >-
+      Хвосты снятого плеча убраны: фронты {{ cdn_retire_front_map | default({}) }},
+      origin {{ cdn_retire_origin | default('-', true) }}.
+      Каталог сайта старого origin на ноде остаётся — чистить отдельно.
