@@ -195,7 +195,16 @@ def main():
             r = sio.call('editMonitor', mon, timeout=30)
             if not r.get('ok'):
                 sys.exit('Kuma: правка монитора не прошла: %s' % r.get('msg'))
-            print(json.dumps({'changed': True, 'id': mid, 'url': a.url}, ensure_ascii=False))
+            # editMonitor НЕ снимает паузу: active в payload Kuma игнорирует, для этого
+            # есть отдельный resumeMonitor (в ветке создания он и вызывается).
+            # Без этого переименованный legacy-монитор остаётся на паузе, heartbeat
+            # протухает, а сторож читает последний UP и считает ноду вечно здоровой.
+            resumed = False
+            if not existing.get('active'):
+                sio.call('resumeMonitor', mid, timeout=30)
+                resumed = True
+            print(json.dumps({'changed': True, 'id': mid, 'url': a.url,
+                              'resumed': resumed}, ensure_ascii=False))
             return
 
         mon = http_template(monitors)
