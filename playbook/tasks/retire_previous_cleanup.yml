@@ -122,9 +122,17 @@
 # Предохранитель: удаляем запись, только если её СОДЕРЖИМОЕ соответствует ожидаемому —
 # A смотрит на IP этой ноды, CNAME на edge CDN. Иначе совпадение имени с чужой
 # записью привело бы к удалению чего-то постороннего.
+#
+# ВНИМАНИЕ: id зоны берётся из списка зон, а НЕ из поля zone_id записи — Cloudflare
+# его больше не отдаёт (проверено 2026-08-10: в объекте записи есть id, name, type,
+# content, ttl, proxied…, но zone_id отсутствует). Обращение к нему роняет задачу
+# с "'dict object' has no attribute 'zone_id'".
 - name: Удаление DNS-записей снятого плеча
   ansible.builtin.uri:
-    url: "https://api.cloudflare.com/client/v4/zones/{{ item.1.zone_id }}/dns_records/{{ item.1.id }}"
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ (cdn_retire_zones.json.result
+      | selectattr('name', 'equalto', item.0.item.split('.')[-2:] | join('.'))
+      | list | first).id }}/dns_records/{{ item.1.id }}
     method: DELETE
     headers: { Authorization: "Bearer {{ cdn_retire_cf_token }}" }
     status_code: [200]
