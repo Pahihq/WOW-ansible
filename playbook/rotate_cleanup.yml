@@ -95,7 +95,12 @@
 
     - name: Удаление DNS-записей
       ansible.builtin.uri:
-        url: "https://api.cloudflare.com/client/v4/zones/{{ item.0.json.result[0].zone_id }}/dns_records/{{ item.0.json.result[0].id }}"
+        # id зоны — из списка зон: Cloudflare больше не отдаёт zone_id в объекте
+        # записи (проверено 2026-08-10), обращение к нему роняет задачу.
+        url: >-
+          https://api.cloudflare.com/client/v4/zones/{{ (cl_zones.json.result
+          | selectattr('name', 'equalto', item.0.item.split('.')[-2:] | join('.'))
+          | list | first).id }}/dns_records/{{ item.0.json.result[0].id }}
         method: DELETE
         headers: { Authorization: "Bearer {{ cl_token }}" }
         status_code: [200]
