@@ -10,23 +10,36 @@
   ansible.builtin.include_vars:
     file: "{{ playbook_dir }}/vars/xhttp_signatures.yml"
 
-- name: Получение хостов и инбаундов
+- name: Получение хостов панели
   ansible.builtin.uri:
-    url: "{{ remnawave_base_url }}{{ item }}"
+    url: "{{ remnawave_base_url }}/api/hosts/"
     headers: "{{ remnawave_headers }}"
     return_content: true
-  register: rw_slot_lookup
-  loop:
-    - /api/hosts/
-    - /api/config-profiles/inbounds
+  register: rw_hosts_lookup
   delegate_to: localhost
   become: false
   changed_when: false
+  until: rw_hosts_lookup is succeeded
+  retries: 3
+  delay: 5
+
+- name: Получение инбаундов панели для выбора слота
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/config-profiles/inbounds"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+  register: rw_inbounds_lookup
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  until: rw_inbounds_lookup is succeeded
+  retries: 3
+  delay: 5
 
 - name: Разбор занятых инбаундов
   ansible.builtin.set_fact:
-    rw_all_hosts: "{{ rw_slot_lookup.results[0].json.response }}"
-    rw_all_inbounds: "{{ rw_slot_lookup.results[1].json.response.inbounds }}"
+    rw_all_hosts: "{{ rw_hosts_lookup.json.response }}"
+    rw_all_inbounds: "{{ rw_inbounds_lookup.json.response.inbounds }}"
 
 # Выключенный хост слот НЕ держит: он выведен из работы, и сигнатуру можно отдавать
 # заново. Без этого фильтра погашенные плечи держали P01-P04 намертво (2026-08-02),

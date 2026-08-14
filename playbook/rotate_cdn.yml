@@ -83,27 +83,41 @@
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/vars/xhttp_signatures.yml"
 
-    - name: Получение нод и инбаундов панели
+    # Не объединять эти запросы в loop: успешный второй endpoint маскирует
+    # ошибку первого, и Ansible не выполняет retry для упавшего элемента.
+    - name: Получение нод панели
       ansible.builtin.uri:
-        url: "{{ remnawave_base_url }}{{ item }}"
+        url: "{{ remnawave_base_url }}/api/nodes/"
         headers: "{{ remnawave_headers }}"
         return_content: true
-      register: rot_lookup
-      loop: ['/api/nodes/', '/api/config-profiles/inbounds']
+      register: rot_nodes_lookup
       delegate_to: localhost
       become: false
       changed_when: false
       # В ошибке status=-1 нет HTTP-ответа: это сбой локального DNS/сети, а не
       # изменение API Remnawave. Краткий retry переживает временный отказ DNS.
-      until: rot_lookup is succeeded
+      until: rot_nodes_lookup is succeeded
+      retries: 3
+      delay: 5
+
+    - name: Получение инбаундов панели
+      ansible.builtin.uri:
+        url: "{{ remnawave_base_url }}/api/config-profiles/inbounds"
+        headers: "{{ remnawave_headers }}"
+        return_content: true
+      register: rot_inbounds_lookup
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      until: rot_inbounds_lookup is succeeded
       retries: 3
       delay: 5
 
     - name: Сопоставление ноды инвентаря с нодой панели по IP
       ansible.builtin.set_fact:
-        rw_all_inbounds: "{{ rot_lookup.results[1].json.response.inbounds }}"
+        rw_all_inbounds: "{{ rot_inbounds_lookup.json.response.inbounds }}"
         cdn_node_uuid: >-
-          {{ (rot_lookup.results[0].json.response
+          {{ (rot_nodes_lookup.json.response
               | selectattr('address', 'equalto', ansible_host) | list | first).uuid }}
         cdn_node_ip: "{{ ansible_host }}"
 
