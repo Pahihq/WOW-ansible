@@ -6,7 +6,7 @@ CDN_API="https://cdn.api.cloud.yandex.net/cdn/v1"
 OP_API="https://operation.api.cloud.yandex.net/operations"
 CONFIG_PATH="${YANDEX_CONFIG_PATH:-$PWD/.env}"
 CDN_DOMAIN="" ORIGIN="" CERT_NAME="${YANDEX_CERTIFICATE_NAME:-wowsecure}"
-STATE_ONLY=false DELETE_MODE=false DRY_RUN=false TMP_DIR="" IAM_TOKEN="" FOLDER_ID=""
+STATE_ONLY=false CNAME_ONLY=false DELETE_MODE=false DRY_RUN=false TMP_DIR="" IAM_TOKEN="" FOLDER_ID=""
 HTTP_CODE="" HTTP_BODY=""
 
 log() { printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*" >&2; }
@@ -18,6 +18,7 @@ usage() {
   cat <<'EOF'
 setup-yandex-cdn.sh --cdn DOMAIN --origin HOST [--certificate-name NAME] [--dry-run]
 setup-yandex-cdn.sh --cdn DOMAIN --state
+setup-yandex-cdn.sh --cdn DOMAIN --cname
 setup-yandex-cdn.sh --cdn DOMAIN --delete [--dry-run]
 
 Порядок: поиск wowsecure -> проверка wildcard SAN/ISSUED -> CNAME -> CDN resource.
@@ -208,6 +209,22 @@ state() {
   jq -cn --argjson r "$r" --arg cs "$status" '{found:true,id:$r.id,status:(if $r.active then "active" else "disabled" end),active:$r.active,sslEnabled:($cs=="ISSUED"),certificateId:($r.sslCertificate.data.cm.id//""),certificateStatus:$cs}'
 }
 
+# Показывает фактическую CNAME-запись и актуальное значение, которое выдаёт
+# Yandex. Нужна сторожу для безопасной самопочинки: после пересоздания CDN
+# запись должна указывать на CNAME, ожидаемый провайдером.
+cname_state() {
+  local zone zone_id records configured expected
+  zone=$(find_zone "$CDN_DOMAIN"); zone_id=$(jq -r '.id' <<<"$zone")
+  request GET "$CF_API/zones/$zone_id/dns_records?name=$CDN_DOMAIN" cf
+  cf_expect "Чтение DNS $CDN_DOMAIN"
+  records=$(jq -c '.result' <<<"$HTTP_BODY")
+  [[ $(jq 'length' <<<"$records") -le 1 ]] || die "Несколько DNS-записей для $CDN_DOMAIN"
+  configured=$(jq -r 'if length == 1 and .[0].type == "CNAME" then .[0].content else "" end' <<<"$records")
+  expected=$(yc_cmd cdn resource get-provider-cname --folder-id "$FOLDER_ID" --format json | jq -r '.cname')
+  jq -cn --arg configured "$(normalize "$configured")" --arg expected "$(normalize "$expected")" \
+    '{configured:$configured,expected:$expected,matches:($configured == $expected)}'
+}
+
 delete_resource() {
   local resource op
   resource=$(find_resource)
@@ -227,18 +244,22 @@ main() {
   while (($#)); do case "$1" in
     --cdn) CDN_DOMAIN=$2; shift 2;; --origin) ORIGIN=$2; shift 2;;
     --certificate-name) CERT_NAME=$2; shift 2;; --state) STATE_ONLY=true; shift;;
+    --cname) CNAME_ONLY=true; shift;;
     --delete) DELETE_MODE=true; shift;;
     --dry-run) DRY_RUN=true; shift;; -h|--help) usage; exit;; *) die "Неизвестный параметр $1";; esac; done
   CDN_DOMAIN=$(normalize "$CDN_DOMAIN"); ORIGIN=$(normalize "$ORIGIN")
   [[ -n "$CDN_DOMAIN" ]] || die "Нужен --cdn"
+  [[ "$STATE_ONLY" == false || "$CNAME_ONLY" == false ]] || die "--state и --cname нельзя использовать вместе"
   [[ "$STATE_ONLY" == false || "$DELETE_MODE" == false ]] || die "--state и --delete нельзя использовать вместе"
-  { $STATE_ONLY || $DELETE_MODE; } || [[ -n "$ORIGIN" ]] || die "Нужен --origin"
+  [[ "$CNAME_ONLY" == false || "$DELETE_MODE" == false ]] || die "--cname и --delete нельзя использовать вместе"
+  { $STATE_ONLY || $CNAME_ONLY || $DELETE_MODE; } || [[ -n "$ORIGIN" ]] || die "Нужен --origin"
   command -v yc >/dev/null && command -v jq >/dev/null && command -v curl >/dev/null || die "Нужны yc, jq, curl"
   FOLDER_ID=${YANDEX_FOLDER_ID:-$(yc_cmd config get folder-id 2>/dev/null || true)}
   [[ -n "$FOLDER_ID" ]] || die "Не задан YANDEX_FOLDER_ID/folder-id"
   IAM_TOKEN=$(yc_cmd iam create-token); TMP_DIR=$(mktemp -d); trap cleanup EXIT
   $STATE_ONLY && { state; return; }
   : "${CLOUDFLARE_ACCOUNT_ID:?}" "${CLOUDFLARE_API_TOKEN:?}"
+  $CNAME_ONLY && { cname_state; return; }
   if $DELETE_MODE; then
     delete_resource
     delete_dns "$CDN_DOMAIN"

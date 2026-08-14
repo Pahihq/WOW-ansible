@@ -33,6 +33,10 @@ MONITOR_PREFIX = 'CDN_'    # CDN_node_ch1_VK / CDN_node_ch1_YANDEX
 RU_PROBE = os.environ.get('CDN_RU_PROBE', 'root@45.150.37.205')
 
 TRIGGER_CODES = {451}      # строго блокировка; всё прочее — только алерт
+# Kuma не получает HTTP-код, когда edge Yandex отдаёт свой wildcard-сертификат
+# вместо сертификата фронта. Это известный сбой свежего CDN-ресурса, а не ошибка
+# origin: его лечим узким пересозданием Yandex CDN, без полной ротации плеча.
+YANDEX_SAN_ERROR = re.compile(r'hostname/ip does not match certificate.?s altnames', re.I)
 STRIKES_REQUIRED = 2       # подряд идущих тиков сторожа с 451
 COOLDOWN_H = 6             # не ротировать одну ноду чаще
 # Сколько минут непрерывного 451 перекрывают cooldown. Смысл: cooldown защищает от
@@ -160,7 +164,7 @@ def age_minutes(iso):
 
 
 def rotation_running():
-    out = subprocess.run(['pgrep', '-f', 'ansible-playbook.*rotate_cdn.yml'],
+    out = subprocess.run(['pgrep', '-f', 'ansible-playbook.*rotate(_yandex)?_cdn.yml'],
                          capture_output=True, text=True)
     return out.returncode == 0
 
@@ -175,6 +179,20 @@ def fire_rotation(node, provider_mode, dry):
     out = subprocess.run(cmd, cwd=ANSIBLE_DIR, capture_output=True, text=True, timeout=3600)
     tail = '\n'.join((out.stdout or '').strip().split('\n')[-25:])
     log('ротация %s завершилась rc=%s\n%s' % (node, out.returncode, tail))
+    return out.returncode == 0, tail
+
+
+def fire_yandex_recreate(node, front, dry):
+    """Пересоздаёт только Yandex CDN текущего фронта и сверяет его CNAME."""
+    cmd = ['ansible-playbook', 'playbook/rotate_yandex_cdn.yml', '--limit', node,
+           '-e', 'apply=true', '-e', 'yandex_cdn_front_domain=%s' % front]
+    if dry:
+        log('Yandex CDN (dry-run, не выполняю): %s' % ' '.join(cmd))
+        return True, 'dry-run'
+    log('ПЕРЕСОЗДАНИЕ YANDEX CDN: %s' % ' '.join(cmd))
+    out = subprocess.run(cmd, cwd=ANSIBLE_DIR, capture_output=True, text=True, timeout=3600)
+    tail = '\n'.join((out.stdout or '').strip().split('\n')[-25:])
+    log('пересоздание Yandex CDN rc=%s\n%s' % (out.returncode, tail))
     return out.returncode == 0, tail
 
 
@@ -204,7 +222,8 @@ def main():
         provider = m.get('provider') or 'vk'
         rec_key = '%s:%s' % (node, provider)
         rec = wd.setdefault(rec_key, {'strikes': 0, 'last_rotation': 0, 'last_alert': 0,
-                                   'first_451': 0})
+                                   'first_451': 0, 'san_strikes': 0,
+                                   'last_yandex_recreate': 0})
         st = node_state(node)
 
         if a.verbose:
@@ -216,6 +235,7 @@ def main():
                 log('%s: фронт снова отвечает, счётчик сброшен' % node)
             rec['strikes'] = 0
             rec['first_451'] = 0
+            rec['san_strikes'] = 0
             continue
 
         # Ротация ноды не завершена или монитор ещё не переехал на новый фронт —
@@ -225,6 +245,38 @@ def main():
             log('%s/%s: пропуск — состояние %s, фронт в state=%s, в мониторе=%s'
                 % (node, provider, st.get('status'), state_front, front))
             continue
+
+        # Kuma формирует это сообщение до HTTP-запроса; FRESH_GRACE_MIN здесь
+        # намеренно не применяется — именно после создания CDN ошибка и проявляется.
+        san_error = provider == 'yandex' and m['status'] == DOWN and YANDEX_SAN_ERROR.search(m.get('msg') or '')
+        if san_error:
+            rec['san_strikes'] = rec.get('san_strikes', 0) + 1
+            if rec['san_strikes'] < STRIKES_REQUIRED:
+                log('%s/Yandex: SAN-ошибка (%d/%d), жду подтверждения'
+                    % (node, rec['san_strikes'], STRIKES_REQUIRED))
+                continue
+            if now_ts() - rec.get('last_yandex_recreate', 0) < COOLDOWN_H * 3600:
+                log('%s/Yandex: SAN-ошибка, но пересоздание уже было менее %d ч назад'
+                    % (node, COOLDOWN_H))
+                continue
+            if rotation_running():
+                log('%s/Yandex: другая CDN-операция уже идёт — отложено' % node)
+                continue
+            telegram('<b>Yandex CDN: сертификат edge не соответствует фронту</b>\n'
+                     'нода: <code>%s</code>\nфронт: <code>%s</code>\n'
+                     'Kuma: <code>%s</code>\n'
+                     'Запускаю пересоздание только Yandex CDN и проверку CNAME.'
+                     % (node, front, (m.get('msg') or '')[:180]), a.dry_run)
+            rec['last_yandex_recreate'] = now_ts()
+            rec['san_strikes'] = 0
+            save_wd(wd)
+            ok, tail = fire_yandex_recreate(node, front, a.dry_run)
+            fired.append(node)
+            if not ok:
+                telegram('<b>Пересоздание Yandex CDN упало</b>\nнода: <code>%s</code>\n'
+                         '<code>%s</code>' % (node, tail[-500:].replace('<', '&lt;')), a.dry_run)
+            break
+        rec['san_strikes'] = 0
 
         fresh = age_minutes(st.get('finished_at'))
         if fresh is not None and fresh < FRESH_GRACE_MIN:

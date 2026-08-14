@@ -1,0 +1,128 @@
+---
+# Самопочинка Yandex CDN при ошибке Kuma "Hostname/IP does not match
+# certificate's altnames". Не меняет публичный домен, Remnawave, балансер
+# или инбаунды: удаляется и создаётся заново только ресурс Yandex CDN и его
+# управляемая CNAME-запись.
+#
+# Предпросмотр: ansible-playbook playbook/rotate_yandex_cdn.yml --limit node_pl3
+# Боевой:       ansible-playbook playbook/rotate_yandex_cdn.yml --limit node_pl3 -e apply=true
+- name: Пересоздание Yandex CDN
+  hosts: eu_nodes
+  gather_facts: false
+  serial: 1
+  vars:
+    apply: false
+    yandex_cdn_front_domain: ""
+  tasks:
+    - name: Загрузка состояния ротации ноды
+      ansible.builtin.include_role:
+        name: cdn_state
+        tasks_from: load
+
+    - name: Проверка состояния Yandex CDN
+      ansible.builtin.assert:
+        that:
+          - (cdn_state.status | default('')) == 'active'
+          - cdn_state.origin_domain | default('') | length > 0
+          - (cdn_state.front_domains | default({})).yandex | default('') | length > 0
+          - yandex_cdn_front_domain | default('') in ['', cdn_state.front_domains.yandex]
+        fail_msg: >-
+          Нужна активная Yandex-ротация с origin и front_domains.yandex;
+          запрошенный фронт={{ yandex_cdn_front_domain | default('') }}.
+
+    - name: Выбор фронта Yandex для пересоздания
+      ansible.builtin.set_fact:
+        yandex_cdn_front: "{{ cdn_state.front_domains.yandex }}"
+        yandex_cdn_origin: "{{ cdn_state.origin_domain }}"
+        yandex_cdn_script: "{{ playbook_dir }}/scripts/setup-yandex-cdn.sh"
+
+    - name: CNAME до пересоздания
+      ansible.builtin.command:
+        argv: ["{{ yandex_cdn_script }}", --cdn, "{{ yandex_cdn_front }}", --cname]
+        chdir: "{{ playbook_dir }}/scripts"
+      environment:
+        YANDEX_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+      register: yandex_cname_before_raw
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Разбор CNAME до пересоздания
+      ansible.builtin.set_fact:
+        yandex_cname_before: "{{ yandex_cname_before_raw.stdout | from_json }}"
+
+    - name: Предпросмотр пересоздания
+      ansible.builtin.debug:
+        msg: >-
+          БЕЗ ИЗМЕНЕНИЙ (нужен -e apply=true): Yandex CDN для
+          {{ yandex_cdn_front }} будет пересоздан. Текущий CNAME:
+          {{ yandex_cname_before.configured | default('(нет)') }}.
+      when: not (apply | bool)
+
+    - name: Удаление проблемного Yandex CDN и CNAME
+      ansible.builtin.command:
+        argv: ["{{ yandex_cdn_script }}", --cdn, "{{ yandex_cdn_front }}", --delete]
+        chdir: "{{ playbook_dir }}/scripts"
+      environment:
+        YANDEX_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+      delegate_to: localhost
+      become: false
+      when: apply | bool
+
+    - name: Создание Yandex CDN заново
+      ansible.builtin.command:
+        argv: ["{{ yandex_cdn_script }}", --cdn, "{{ yandex_cdn_front }}", --origin, "{{ yandex_cdn_origin }}", --certificate-name, "{{ yandex_cdn_certificate_name | default('wowsecure') }}"]
+        chdir: "{{ playbook_dir }}/scripts"
+      environment:
+        YANDEX_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+      delegate_to: localhost
+      become: false
+      when: apply | bool
+
+    - name: Ожидание готовности Yandex CDN и TLS
+      ansible.builtin.command:
+        argv: ["{{ yandex_cdn_script }}", --cdn, "{{ yandex_cdn_front }}", --state]
+        chdir: "{{ playbook_dir }}/scripts"
+      environment:
+        YANDEX_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+      register: yandex_cdn_state_raw
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      until: >-
+        (yandex_cdn_state_raw.stdout | from_json).found | default(false)
+        and (yandex_cdn_state_raw.stdout | from_json).sslEnabled | default(false)
+        and (yandex_cdn_state_raw.stdout | from_json).active | default(false)
+      retries: 70
+      delay: 30
+      when: apply | bool
+
+    - name: CNAME после пересоздания
+      ansible.builtin.command:
+        argv: ["{{ yandex_cdn_script }}", --cdn, "{{ yandex_cdn_front }}", --cname]
+        chdir: "{{ playbook_dir }}/scripts"
+      environment:
+        YANDEX_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+      register: yandex_cname_after_raw
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      when: apply | bool
+
+    - name: Проверка CNAME после пересоздания
+      ansible.builtin.assert:
+        that:
+          - (yandex_cname_after_raw.stdout | from_json).matches | bool
+        fail_msg: >-
+          После пересоздания CNAME {{ yandex_cdn_front }} не указывает на
+          актуальный CNAME Yandex: {{ yandex_cname_after_raw.stdout }}
+      when: apply | bool
+
+    - name: Итог пересоздания Yandex CDN
+      ansible.builtin.debug:
+        msg: >-
+          Yandex CDN {{ yandex_cdn_front }} пересоздан. CNAME был
+          {{ yandex_cname_before.configured | default('(нет)') }}, стал
+          {{ (yandex_cname_after_raw.stdout | from_json).configured }};
+          изменился={{ yandex_cname_before.configured != ((yandex_cname_after_raw.stdout | from_json).configured) }}.
+      when: apply | bool

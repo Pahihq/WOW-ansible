@@ -98,7 +98,9 @@
       ansible.builtin.hostname:
         name: "{{ system_hostname }}"
 
-    - name: Добавить имя хоста в /etc/hosts
+    # hostname(1) меняет /etc/hostname, но не добавляет локальную запись.
+    # Без неё sudo и systemd-resolved могут не разрешить собственное имя хоста.
+    - name: Добавить имя хоста в /etc/hosts для локального разрешения
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: '^127\.0\.1\.1\s+'
@@ -106,6 +108,11 @@
         owner: root
         group: root
         mode: "0644"
+
+    - name: Проверить локальное разрешение установленного hostname
+      ansible.builtin.command:
+        argv: [getent, hosts, "{{ system_hostname }}"]
+      changed_when: false
 
     - name: Создать каталоги мониторинга
       ansible.builtin.file:
