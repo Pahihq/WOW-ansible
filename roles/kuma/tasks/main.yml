@@ -27,7 +27,11 @@
   register: kuma_res
   delegate_to: localhost
   become: false
-  changed_when: (kuma_res.stdout | from_json).changed | default(false)
+  # Не маскируем stderr CLI ошибкой разбора пустого stdout.
+  failed_when: kuma_res.rc != 0
+  changed_when: >-
+    kuma_res.rc == 0 and
+    ((kuma_res.stdout | from_json).changed | default(false))
 
 - name: Результат постановки на мониторинг
   ansible.builtin.debug:

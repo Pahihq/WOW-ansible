@@ -226,6 +226,12 @@ def main():
         sio.call('resumeMonitor', new_id, timeout=30)
         print(json.dumps({'changed': True, 'id': new_id, 'url': a.url}, ensure_ascii=False))
     finally:
-        sio.disconnect()
+        # Операция уже могла успешно завершиться на сервере. Ошибка закрытия
+        # websocket не должна превращать её в failure и терять JSON из stdout
+        # (при неинтерактивном запуске stdout ещё буферизован).
+        try:
+            sio.disconnect()
+        except Exception:
+            pass
 
 main()
