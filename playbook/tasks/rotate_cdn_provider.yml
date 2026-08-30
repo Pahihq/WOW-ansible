@@ -14,6 +14,9 @@
   environment:
     VKCS_CONFIG_PATH: "{{ cdn_provider_env_file }}"
     YANDEX_CONFIG_PATH: "{{ cdn_provider_env_file }}"
+    ALL_PROXY: "{{ cdn_api_proxy | default('') }}"
+    HTTPS_PROXY: "{{ cdn_api_proxy_go | default('') }}"
+    HTTP_PROXY: "{{ cdn_api_proxy_go | default('') }}"
   register: cdn_setup_result
   delegate_to: localhost
   become: false
@@ -30,14 +33,17 @@
   environment:
     VKCS_CONFIG_PATH: "{{ cdn_provider_env_file }}"
     YANDEX_CONFIG_PATH: "{{ cdn_provider_env_file }}"
+    ALL_PROXY: "{{ cdn_api_proxy | default('') }}"
+    HTTPS_PROXY: "{{ cdn_api_proxy_go | default('') }}"
+    HTTP_PROXY: "{{ cdn_api_proxy_go | default('') }}"
   register: cdn_provider_state
   delegate_to: localhost
   become: false
   changed_when: false
   until: >-
-    (cdn_provider_state.stdout | from_json).found | default(false)
-    and (cdn_provider_state.stdout | from_json).sslEnabled | default(false)
-    and (cdn_provider_state.stdout | from_json).active | default(false)
+    (cdn_provider_state.stdout | default('{}', true) | from_json).found | default(false)
+    and (cdn_provider_state.stdout | default('{}', true) | from_json).sslEnabled | default(false)
+    and (cdn_provider_state.stdout | default('{}', true) | from_json).active | default(false)
   retries: 70
   delay: 30
 

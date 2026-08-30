@@ -1,0 +1,10 @@
+---
+# 2026-08-30: транзит с контрол-хоста (Финляндия) в РФ деградировал —
+# SYN-loss 70-100% на ВСЕ российские адреса (VK Cloud API, Yandex, Kuma, RU-ноды).
+# ICMP при этом чистый, так что «хост живой» — не показатель.
+# CDN-API дёргаем через SOCKS-реле ru-relay.service (SSH -D на node_pl1,
+# у него путь в РФ чистый). Проверка: systemctl status ru-relay.
+#
+# Транзит починят — обнулить обе переменные ('') и погасить реле.
+cdn_api_proxy: "socks5h://127.0.0.1:11080"     # curl (VK CDN API, Cloudflare)
+cdn_api_proxy_go: "socks5://127.0.0.1:11080"   # yc CLI (Go понимает socks5, не socks5h)

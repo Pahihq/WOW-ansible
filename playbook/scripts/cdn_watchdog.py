@@ -140,13 +140,25 @@ def probe_origin(origin, node_ip):
                       'https://%s/' % origin])
 
 
+KUMA_TRIES = 3          # websocket до Kuma рвётся на плохом транзите
+KUMA_RETRY_SLEEP = 5
+
+
 def kuma_status():
-    out = subprocess.run([VENV_PY, KUMA_CLI, 'status', '--parent', str(KUMA_GROUP),
-                          '--prefix', MONITOR_PREFIX, '--env', KUMA_ENV],
-                         capture_output=True, text=True, timeout=120)
-    if out.returncode != 0:
-        raise RuntimeError('kuma_cli status: %s' % (out.stderr or '')[:300])
-    return json.loads(out.stdout)
+    # Одна сорванная сессия не повод ронять весь тик сторожа: без него нода
+    # под 451 остаётся неротированной до следующего запуска таймера.
+    last = ''
+    for attempt in range(1, KUMA_TRIES + 1):
+        out = subprocess.run([VENV_PY, KUMA_CLI, 'status', '--parent', str(KUMA_GROUP),
+                              '--prefix', MONITOR_PREFIX, '--env', KUMA_ENV],
+                             capture_output=True, text=True, timeout=120)
+        if out.returncode == 0:
+            return json.loads(out.stdout)
+        last = (out.stderr or '')[:300]
+        if attempt < KUMA_TRIES:
+            time.sleep(KUMA_RETRY_SLEEP)
+    raise RuntimeError('kuma_cli status, %d попытки подряд неудачны: %s'
+                       % (KUMA_TRIES, last))
 
 
 def node_state(node):

@@ -45,7 +45,28 @@ def load_env(path):
     return env
 
 
+KUMA_CONNECT_TRIES = 4     # диалог с Kuma рвётся на плохом транзите
+KUMA_CONNECT_SLEEP = 4
+
+
 def connect(env, want_heartbeats=False):
+    # Коннект встаёт, а ответ на login не доходит - один сорванный диалог
+    # не должен ронять ротацию на шаге постановки монитора.
+    last = None
+    for attempt in range(1, KUMA_CONNECT_TRIES + 1):
+        try:
+            return _connect_once(env, want_heartbeats)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            last = exc
+            if attempt < KUMA_CONNECT_TRIES:
+                time.sleep(KUMA_CONNECT_SLEEP)
+    raise RuntimeError('Kuma: %d попыток подряд неудачны: %r'
+                       % (KUMA_CONNECT_TRIES, last))
+
+
+def _connect_once(env, want_heartbeats=False):
     sio = socketio.Client(ssl_verify=True)
     state = {'heartbeats': {}}
 
@@ -57,23 +78,30 @@ def connect(env, want_heartbeats=False):
     def _hb(mid, hbs, overwrite=None):
         state['heartbeats'][str(mid)] = hbs
 
-    sio.connect(env['KUMA_URL'], transports=['websocket'], wait_timeout=25)
-    res = sio.call('login', {'username': env['KUMA_USER'],
-                             'password': env['KUMA_PASS'], 'token': ''}, timeout=30)
-    if not res.get('ok'):
-        sys.exit('Kuma: логин не прошёл: %s' % res.get('msg'))
-    for _ in range(20):
-        if 'monitors' in state:
-            break
-        sio.sleep(0.5)
-    if want_heartbeats:
-        # хартбиты приезжают отдельными событиями уже после monitorList
-        for _ in range(16):
-            if state['heartbeats']:
+    try:
+        sio.connect(env['KUMA_URL'], transports=['websocket'], wait_timeout=30)
+        res = sio.call('login', {'username': env['KUMA_USER'],
+                                 'password': env['KUMA_PASS'], 'token': ''}, timeout=45)
+        if not res.get('ok'):
+            sys.exit('Kuma: логин не прошёл: %s' % res.get('msg'))
+        for _ in range(20):
+            if 'monitors' in state:
                 break
             sio.sleep(0.5)
-        sio.sleep(2)
-    return sio, state.get('monitors', {}), state['heartbeats']
+        if want_heartbeats:
+            # хартбиты приезжают отдельными событиями уже после monitorList
+            for _ in range(16):
+                if state['heartbeats']:
+                    break
+                sio.sleep(0.5)
+            sio.sleep(2)
+        return sio, state.get('monitors', {}), state['heartbeats']
+    except BaseException:
+        try:
+            sio.disconnect()
+        except Exception:
+            pass
+        raise
 
 
 def find_by_name(monitors, name):

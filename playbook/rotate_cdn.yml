@@ -140,13 +140,14 @@
       ansible.builtin.set_fact:
         cdn_inbound_tag: "{{ cdn_state.inbound_tag }}"
         cdn_path: "{{ cdn_state.path }}"
-      when: cdn_legacy_vk_migration | bool
+      when: (cdn_legacy_vk_migration | bool) or (cdn_resuming | bool)
 
     - name: Выбор свободного слота сигнатуры
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/remnawave/tasks/slot_allocate.yml"
       when:
         - cdn_slots_exist | bool
         - not (cdn_legacy_vk_migration | bool)
+        - not (cdn_resuming | bool)
 
     # Пока инбаунды CDN_Pxx не заведены, ротация идёт на легаси-инбаунде:
     # домены меняются, путь остаётся прежним. Уникальные пути включатся после
@@ -160,6 +161,7 @@
       when:
         - not (cdn_slots_exist | bool)
         - not (cdn_legacy_vk_migration | bool)
+        - not (cdn_resuming | bool)
 
     - name: Предупреждение про неуникальный путь
       ansible.builtin.debug:
@@ -169,6 +171,7 @@
       when:
         - not (cdn_slots_exist | bool)
         - not (cdn_legacy_vk_migration | bool)
+        - not (cdn_resuming | bool)
 
     - name: Генерация доменов и A-записи origin
       ansible.builtin.include_role:
@@ -194,18 +197,21 @@
     - name: Запоминание прошлой ротации
       ansible.builtin.set_fact:
         cdn_prev: >-
-          {{ {'host_uuid': cdn_state.host_uuid | default(''),
-              'host_uuids': cdn_state.host_uuids | default({}),
-              'front_domain': cdn_state.front_domain | default(''),
-              'front_domains': cdn_state.front_domains | default({}),
-              'origin_domain': cdn_state.origin_domain | default(''),
-              'vk_resource_id': cdn_state.vk_resource_id | default(''),
-              'cdn_resource_ids': cdn_state.cdn_resource_ids | default({}),
-              'inbound_tag': cdn_state.inbound_tag | default('')}
-             if ((cdn_state.status | default('')) == 'active'
-                 and not (cdn_resuming | bool)
-                 and not (cdn_legacy_vk_migration | bool))
-             else {} }}
+          {{ cdn_state.prev | default({})
+             if (cdn_resuming | bool)
+             else (
+               {'host_uuid': cdn_state.host_uuid | default(''),
+                'host_uuids': cdn_state.host_uuids | default({}),
+                'front_domain': cdn_state.front_domain | default(''),
+                'front_domains': cdn_state.front_domains | default({}),
+                'origin_domain': cdn_state.origin_domain | default(''),
+                'vk_resource_id': cdn_state.vk_resource_id | default(''),
+                'cdn_resource_ids': cdn_state.cdn_resource_ids | default({}),
+                'inbound_tag': cdn_state.inbound_tag | default('')}
+               if ((cdn_state.status | default('')) == 'active'
+                   and not (cdn_legacy_vk_migration | bool))
+               else {}
+             ) }}
 
     - name: Фиксация начатой ротации
       ansible.builtin.include_role:

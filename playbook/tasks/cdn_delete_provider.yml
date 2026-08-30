@@ -20,6 +20,9 @@
   environment:
     VKCS_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
     YANDEX_CONFIG_PATH: "{{ playbook_dir }}/secrets/.env"
+    ALL_PROXY: "{{ cdn_api_proxy | default('') }}"
+    HTTPS_PROXY: "{{ cdn_api_proxy_go | default('') }}"
+    HTTP_PROXY: "{{ cdn_api_proxy_go | default('') }}"
   register: cdn_delete_result
   delegate_to: localhost
   become: false
