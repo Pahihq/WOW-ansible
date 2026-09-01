@@ -15,4 +15,4 @@ services:
       - NODE_PORT={{ remnanode_api_port }}
       - SECRET_KEY={{ remnanode_secret_key }}
     volumes:
-      - {{ remnanode_zapret_dat_path }}:/usr/local/bin/zapret.dat:ro
+      - "{{ remnanode_log_dir }}:/var/log/remnanode"

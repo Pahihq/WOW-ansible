@@ -250,6 +250,28 @@
       delegate_to: localhost
       become: false
 
+    - name: Удалить файлы и каталоги ds-guard с хоста
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ ds_guard_path | dirname }}"
+        - "{{ ds_guard_result_dir }}"
+        - /etc/logrotate.d/suricata
+        - "{{ logrotate_timer_override_dir }}/override.conf"
+      register: ds_guard_cleanup
+
+    - name: Перечитать конфигурацию systemd после очистки
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: ds_guard_cleanup.changed | default(false)
+
+    - name: Применить штатное расписание logrotate после очистки
+      ansible.builtin.systemd_service:
+        name: logrotate.timer
+        state: restarted
+      when: ds_guard_cleanup.changed | default(false)
+
     - name: Отметить неуспешные хосты после сохранения отчёта
       ansible.builtin.assert:
         that:

@@ -39,9 +39,7 @@
   vars:
     remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
     remnanode_dir: /opt/remnanode
-    remnanode_xray_share_dir: /opt/remnawave/xray/share
-    remnanode_zapret_dat_url: https://github.com/kutovoys/ru_gov_zapret/releases/latest/download/zapret.dat
-    remnanode_zapret_dat_path: "{{ remnanode_xray_share_dir }}/zapret.dat"
+    remnanode_log_dir: /var/log/remnanode
     remnanode_api_port: 21412
 
   pre_tasks:
@@ -72,24 +70,13 @@
       changed_when: false
 
   tasks:
-    - name: Создать каталог ресурсов Xray
+    - name: Создать каталог логов RemnaNode
       ansible.builtin.file:
-        path: "{{ remnanode_xray_share_dir }}"
+        path: "{{ remnanode_log_dir }}"
         state: directory
         owner: root
         group: root
         mode: "0755"
-
-    - name: Скачать базу маршрутизации zapret
-      ansible.builtin.get_url:
-        url: "{{ remnanode_zapret_dat_url }}"
-        dest: "{{ remnanode_zapret_dat_path }}"
-        owner: root
-        group: root
-        mode: "0644"
-        force: true
-      notify:
-        - Запустить стандартный стек Remnawave
 
     - name: Создать Compose-файл стандартного Remnawave Node
       ansible.builtin.template:
