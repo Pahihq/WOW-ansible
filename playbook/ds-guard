@@ -1,256 +1,46 @@
 ---
-- name: Установить и запустить ds-guard
+- name: Полностью удалить ds-guard
   hosts: docker_nodes
   become: true
   gather_facts: false
   ignore_unreachable: true
 
   vars:
-    ds_guard_source: "{{ playbook_dir }}/files/ds-guard"
-    ds_guard_checksum: "8343bb5d41b0377e375826ce615f42b646a299aaa4c9b28421c95dc9613e3863"
     ds_guard_path: /usr/local/lib/ds-guard/ds-guard
     ds_guard_result_dir: /var/log/ds-guard
-
-    suricata_logrotate_source: "{{ playbook_dir }}/files/suricata.logrotate"
-    logrotate_timer_source: "{{ playbook_dir }}/files/logrotate-hourly.conf"
     logrotate_timer_override_dir: /etc/systemd/system/logrotate.timer.d
 
-    ds_guard_timeout_seconds: 21600
-    ds_guard_poll_delay_seconds: 30
-    ds_guard_local_result_dir: "{{ playbook_dir }}/../reports/ds-guard"
-
-  pre_tasks:
-    - name: Создать локальный каталог отчётов
-      ansible.builtin.file:
-        path: "{{ ds_guard_local_result_dir }}"
-        state: directory
-        mode: "0750"
-      delegate_to: localhost
-      become: false
-      run_once: true
-
-    - name: Проверить наличие локальных файлов
-      ansible.builtin.stat:
-        path: "{{ item }}"
-        checksum_algorithm: sha256
-      loop:
-        - "{{ ds_guard_source }}"
-        - "{{ suricata_logrotate_source }}"
-        - "{{ logrotate_timer_source }}"
-      register: local_files
-      delegate_to: localhost
-      become: false
-      run_once: true
-
-    - name: Убедиться, что локальные файлы существуют
-      ansible.builtin.assert:
-        that:
-          - item.stat.exists
-          - item.stat.isreg
-        fail_msg: "Локальный файл {{ item.item }} не найден"
-      loop: "{{ local_files.results }}"
-      delegate_to: localhost
-      become: false
-      run_once: true
-
-    - name: Проверить SHA-256 локального ds-guard
-      ansible.builtin.assert:
-        that:
-          - local_files.results[0].stat.checksum == ds_guard_checksum
-        fail_msg: >-
-          SHA-256 файла {{ ds_guard_source }} не совпадает.
-          Получено: {{ local_files.results[0].stat.checksum | default('неизвестно') }}
-      delegate_to: localhost
-      become: false
-      run_once: true
-
-    - name: Создать необходимые каталоги на хосте
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "{{ item.mode }}"
-      loop:
-        - path: "{{ ds_guard_path | dirname }}"
-          mode: "0755"
-        - path: "{{ ds_guard_result_dir }}"
-          mode: "0755"
-        - path: "{{ logrotate_timer_override_dir }}"
-          mode: "0755"
-      register: ds_guard_directories
-      ignore_errors: true
-
-    - name: Установить необходимые пакеты
-      ansible.builtin.apt:
-        name:
-          - logrotate
-        state: present
-        update_cache: true
-        cache_valid_time: 3600
-      register: package_install
-      ignore_errors: true
-
-    - name: Скопировать ds-guard из папки files
-      ansible.builtin.copy:
-        src: "{{ ds_guard_source }}"
-        dest: "{{ ds_guard_path }}"
-        owner: root
-        group: root
-        mode: "0755"
-      register: ds_guard_copy
-      when:
-        - not (ds_guard_directories.unreachable | default(false))
-        - not (ds_guard_directories.failed | default(false))
-      ignore_errors: true
-
-    - name: Проверить SHA-256 установленного ds-guard
-      ansible.builtin.stat:
-        path: "{{ ds_guard_path }}"
-        checksum_algorithm: sha256
-      register: installed_ds_guard
-      when:
-        - ds_guard_copy is defined
-        - not (ds_guard_copy.failed | default(false))
-      ignore_errors: true
-
-    - name: Подтвердить контрольную сумму установленного ds-guard
-      ansible.builtin.assert:
-        that:
-          - installed_ds_guard.stat.exists
-          - installed_ds_guard.stat.checksum == ds_guard_checksum
-        fail_msg: "Установленный ds-guard не прошёл проверку SHA-256"
-      when:
-        - installed_ds_guard is defined
-        - installed_ds_guard.stat is defined
-
-    - name: Установить конфигурацию ротации Suricata
-      ansible.builtin.copy:
-        src: "{{ suricata_logrotate_source }}"
-        dest: /etc/logrotate.d/suricata
-        owner: root
-        group: root
-        mode: "0644"
-        validate: "/usr/sbin/logrotate --debug %s"
-      register: suricata_logrotate
-      ignore_errors: true
-
-    - name: Установить ежечасное расписание logrotate
-      ansible.builtin.copy:
-        src: "{{ logrotate_timer_source }}"
-        dest: "{{ logrotate_timer_override_dir }}/override.conf"
-        owner: root
-        group: root
-        mode: "0644"
-      register: logrotate_timer_override
-      ignore_errors: true
-
-    - name: Перечитать конфигурацию systemd
-      ansible.builtin.systemd_service:
-        daemon_reload: true
-      when: logrotate_timer_override.changed | default(false)
-
-    - name: Включить и перезапустить logrotate.timer
-      ansible.builtin.systemd_service:
-        name: logrotate.timer
-        enabled: true
-        state: restarted
-      when:
-        - not (logrotate_timer_override.failed | default(false))
-
-    - name: Принудительно проверить ротацию Suricata
-      ansible.builtin.command:
-        argv:
-          - /usr/sbin/logrotate
-          - --force
-          - /etc/logrotate.d/suricata
-      register: logrotate_test
-      changed_when: true
-      failed_when: false
-      when:
-        - not (suricata_logrotate.failed | default(false))
-
   tasks:
-    - name: Запустить ds-guard асинхронно
+    - name: Остановить запущенный ds-guard
       ansible.builtin.command:
         argv:
-          - timeout
-          - --signal=TERM
-          - --kill-after=60s
-          - "{{ ds_guard_timeout_seconds | string }}"
+          - pkill
+          - --signal
+          - TERM
+          - --full
           - "{{ ds_guard_path }}"
-      async: "{{ (ds_guard_timeout_seconds | int) + 120 }}"
-      poll: 0
-      register: ds_guard_job
-      changed_when: true
-      when:
-        - installed_ds_guard is defined
-        - installed_ds_guard.stat is defined
-        - installed_ds_guard.stat.exists | default(false)
-        - installed_ds_guard.stat.checksum | default('') == ds_guard_checksum
+      register: ds_guard_stop
+      changed_when: ds_guard_stop.rc == 0
+      failed_when: ds_guard_stop.rc not in [0, 1]
 
-    - name: Дождаться завершения ds-guard
-      ansible.builtin.async_status:
-        jid: "{{ ds_guard_job.ansible_job_id }}"
-      register: ds_guard_status
-      until: ds_guard_status.finished | default(false) | bool
-      retries: >-
-        {{
-          ((ds_guard_timeout_seconds | int) //
-          (ds_guard_poll_delay_seconds | int)) + 5
-        }}
-      delay: "{{ ds_guard_poll_delay_seconds | int }}"
-      changed_when: false
-      failed_when: false
-      when:
-        - ds_guard_job is defined
-        - ds_guard_job.ansible_job_id is defined
+    - name: Подождать завершения ds-guard
+      ansible.builtin.pause:
+        seconds: 2
+      when: ds_guard_stop.rc == 0
 
-    - name: Получить использование диска после установки
+    - name: Принудительно остановить оставшийся ds-guard
       ansible.builtin.command:
         argv:
-          - df
-          - -h
-          - /
-      register: disk_usage
-      changed_when: false
-      failed_when: false
+          - pkill
+          - --signal
+          - KILL
+          - --full
+          - "{{ ds_guard_path }}"
+      register: ds_guard_kill
+      changed_when: ds_guard_kill.rc == 0
+      failed_when: ds_guard_kill.rc not in [0, 1]
 
-    - name: Получить состояние logrotate.timer
-      ansible.builtin.command:
-        argv:
-          - systemctl
-          - list-timers
-          - logrotate.timer
-          - --no-pager
-      register: logrotate_timer_status
-      changed_when: false
-      failed_when: false
-
-    - name: Сохранить отчёт хоста на управляющей машине
-      ansible.builtin.copy:
-        content: |
-          {{
-            {
-              'host': inventory_hostname,
-              'directories': ds_guard_directories | default({}),
-              'package_install': package_install | default({}),
-              'ds_guard_copy': ds_guard_copy | default({}),
-              'installed_ds_guard': installed_ds_guard | default({}),
-              'suricata_logrotate': suricata_logrotate | default({}),
-              'logrotate_test': logrotate_test | default({}),
-              'logrotate_timer': logrotate_timer_status | default({}),
-              'job': ds_guard_job | default({}),
-              'status': ds_guard_status | default({}),
-              'disk_usage': disk_usage | default({})
-            } | to_nice_json
-          }}
-        dest: "{{ ds_guard_local_result_dir }}/{{ inventory_hostname }}.json"
-        mode: "0640"
-      delegate_to: localhost
-      become: false
-
-    - name: Удалить файлы и каталоги ds-guard с хоста
+    - name: Удалить файлы и каталоги ds-guard
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
@@ -261,24 +51,27 @@
         - "{{ logrotate_timer_override_dir }}/override.conf"
       register: ds_guard_cleanup
 
-    - name: Перечитать конфигурацию systemd после очистки
+    - name: Удалить пустой каталог override logrotate.timer
+      ansible.builtin.command:
+        argv:
+          - rmdir
+          - "{{ logrotate_timer_override_dir }}"
+      register: logrotate_override_dir_cleanup
+      changed_when: logrotate_override_dir_cleanup.rc == 0
+      failed_when: false
+
+    - name: Перечитать конфигурацию systemd
       ansible.builtin.systemd_service:
         daemon_reload: true
-      when: ds_guard_cleanup.changed | default(false)
+      when: >-
+        (ds_guard_cleanup.changed | default(false)) or
+        (logrotate_override_dir_cleanup.changed | default(false))
 
-    - name: Применить штатное расписание logrotate после очистки
+    - name: Применить штатное расписание logrotate
       ansible.builtin.systemd_service:
         name: logrotate.timer
         state: restarted
-      when: ds_guard_cleanup.changed | default(false)
-
-    - name: Отметить неуспешные хосты после сохранения отчёта
-      ansible.builtin.assert:
-        that:
-          - ds_guard_status is defined
-          - ds_guard_status.finished | default(false) | bool
-          - ds_guard_status.rc | default(1) | int == 0
-        fail_msg: >-
-          ds-guard на {{ inventory_hostname }} не завершился успешно.
-          Отчёт сохранён в
-          {{ ds_guard_local_result_dir }}/{{ inventory_hostname }}.json.
+      failed_when: false
+      when: >-
+        (ds_guard_cleanup.changed | default(false)) or
+        (logrotate_override_dir_cleanup.changed | default(false))
