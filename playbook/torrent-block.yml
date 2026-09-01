@@ -1,0 +1,92 @@
+---
+- name: Установить и настроить Torrent Blocker
+  hosts: docker_nodes
+  become: true
+  gather_facts: false
+
+  vars:
+    tblocker_key_url: https://repo.remna.dev/xray-tools/public.gpg
+    tblocker_key_source: /usr/share/keyrings/openrepo-xray-tools.public.gpg
+    tblocker_keyring: /usr/share/keyrings/openrepo-xray-tools.gpg
+    tblocker_repository: >-
+      deb [arch=any signed-by={{ tblocker_keyring }}]
+      https://repo.remna.dev/xray-tools/ stable main
+    tblocker_config_path: /opt/tblocker/config.yaml
+    tblocker_log_file: /var/log/remnanode/access.log
+    tblocker_block_duration: 120
+    tblocker_torrent_tag: TORRENT
+    tblocker_block_mode: nft
+
+  tasks:
+    - name: Скачать открытый ключ репозитория Xray Tools
+      ansible.builtin.get_url:
+        url: "{{ tblocker_key_url }}"
+        dest: "{{ tblocker_key_source }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: tblocker_key_download
+
+    - name: Проверить наличие keyring Xray Tools
+      ansible.builtin.stat:
+        path: "{{ tblocker_keyring }}"
+      register: tblocker_keyring_stat
+
+    - name: Преобразовать ключ Xray Tools в формат GPG keyring
+      ansible.builtin.command:
+        argv:
+          - gpg
+          - --yes
+          - --dearmor
+          - --output
+          - "{{ tblocker_keyring }}"
+          - "{{ tblocker_key_source }}"
+      when: >-
+        (tblocker_key_download.changed | default(false)) or
+        (not tblocker_keyring_stat.stat.exists)
+
+    - name: Добавить APT-репозиторий Xray Tools
+      ansible.builtin.apt_repository:
+        repo: "{{ tblocker_repository }}"
+        filename: openrepo-xray-tools
+        state: present
+        update_cache: true
+
+    - name: Установить Torrent Blocker
+      ansible.builtin.apt:
+        name: tblocker
+        state: present
+
+    - name: Создать каталог логов RemnaNode
+      ansible.builtin.file:
+        path: "{{ tblocker_log_file | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Настроить Torrent Blocker
+      ansible.builtin.copy:
+        dest: "{{ tblocker_config_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          LogFile: "{{ tblocker_log_file }}"
+          BlockDuration: {{ tblocker_block_duration }}
+          TorrentTag: "{{ tblocker_torrent_tag }}"
+          BlockMode: "{{ tblocker_block_mode }}"
+      notify: Перезапустить Torrent Blocker
+
+    - name: Включить и запустить Torrent Blocker
+      ansible.builtin.systemd_service:
+        name: tblocker.service
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Перезапустить Torrent Blocker
+      ansible.builtin.systemd_service:
+        name: tblocker.service
+        state: restarted
