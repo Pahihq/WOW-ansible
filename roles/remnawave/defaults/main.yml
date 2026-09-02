@@ -3,6 +3,18 @@
 remnawave_base_url: "https://panel.wowsecure.ru"
 remnawave_token_file: "{{ playbook_dir }}/secrets/remnawave_token"
 
+# Регистрация стандартных RemnaNode в панели.
+remnawave_node_name: "{{ inventory_hostname }}"
+remnawave_node_address: "{{ ansible_host | default(inventory_hostname) }}"
+remnawave_node_port: "{{ remnanode_api_port | default(21412) }}"
+remnawave_node_country_code: "XX"
+remnawave_node_default_inbound_tag: "VLESS_GRPC_REALITY_V2"
+remnawave_node_tags:
+  - ANSIBLE
+remnawave_node_wait_connected: true
+remnawave_node_wait_retries: 12
+remnawave_node_wait_delay: 5
+
 # Балансер, за которым живёт плитка WOW24.
 remnawave_balancer_template_uuid: "def77261-ec2c-4154-80b7-f215803b78ba"
 

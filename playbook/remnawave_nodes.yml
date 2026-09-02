@@ -1,0 +1,15 @@
+---
+- name: Создать или обновить VPN-ноды в Remnawave
+  hosts: docker_nodes
+  become: false
+  gather_facts: false
+  serial: 1
+
+  roles:
+    - role: remnawave
+
+  tasks:
+    - name: Синхронизировать ноду с панелью
+      ansible.builtin.include_role:
+        name: remnawave
+        tasks_from: node_upsert

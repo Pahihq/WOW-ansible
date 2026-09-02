@@ -37,30 +37,15 @@
   gather_facts: false
 
   vars:
-    remnanode_secret_key_file: "{{ playbook_dir }}/secrets/remnanode_secret_key"
     remnanode_dir: /opt/remnanode
     remnanode_log_dir: /var/log/remnanode
     remnanode_api_port: 21412
+    remnanode_secret_key_path: "{{ remnanode_dir }}/.secret_key"
+
+  roles:
+    - role: remnawave
 
   pre_tasks:
-    - name: Проверить локальный файл секретного ключа Remnawave
-      ansible.builtin.stat:
-        path: "{{ remnanode_secret_key_file }}"
-      delegate_to: localhost
-      become: false
-      register: remnanode_secret_key_file_stat
-
-    - name: Проверить наличие локального файла секретного ключа
-      ansible.builtin.assert:
-        that:
-          - remnanode_secret_key_file_stat.stat.exists
-        fail_msg: "Отсутствует файл секретного ключа: {{ remnanode_secret_key_file }}"
-
-    - name: Прочитать локальный секретный ключ Remnawave
-      ansible.builtin.set_fact:
-        remnanode_secret_key: "{{ lookup('ansible.builtin.file', remnanode_secret_key_file) | trim }}"
-      no_log: true
-
     - name: Проверить Docker CLI
       ansible.builtin.command: docker --version
       changed_when: false
@@ -70,6 +55,11 @@
       changed_when: false
 
   tasks:
+    - name: Получить SECRET_KEY RemnaNode через API панели
+      ansible.builtin.include_role:
+        name: remnawave
+        tasks_from: node_secret_key
+
     - name: Создать каталог логов RemnaNode
       ansible.builtin.file:
         path: "{{ remnanode_log_dir }}"

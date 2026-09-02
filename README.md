@@ -31,7 +31,7 @@ Cloudflare, ресурсами VK Cloud CDN и Yandex Cloud CDN, Remnawave и м
 | Область | Компоненты | Назначение |
 | --- | --- | --- |
 | База | `bootstrap.yml` | Обновление Debian/Ubuntu, общие пакеты, Docker Engine/Compose, swap, sysctl, zsh и SSH-настройки. |
-| VPN-ноды | `remnanode.yml`, `update_remnanode.yml`, `ufw.yml` | Развёртывание и обновление RemnaNode, настройка безопасного UFW. |
+| VPN-ноды | `remnanode.yml`, `remnawave_nodes.yml`, `update_remnanode.yml`, `ufw.yml` | Развёртывание RemnaNode, регистрация нод в панели и настройка безопасного UFW. |
 | Наблюдаемость | `monitoring.yml`, `reporting.yml`, `multitest.yml` | cAdvisor, node_exporter, vmagent, speedtest-метрики, Google Sheets и нагрузочные отчёты. |
 | CDN-пул | `profile_inbounds_sync.yml`, `rotate_cdn.yml`, `panel_sync.yml`, `kuma_sync.yml` | Инбаунды CDN, ротация фронтов, Remnawave-балансер и Uptime Kuma. |
 | Восстановление | `cdn_teardown.yml`, `rotate_cleanup.yml`, `find_orphans.py`, `cdn_watchdog.py` | Штатное удаление CDN-плеча, чистка незавершённых ротаций, поиск сирот и осторожная авторотация при HTTP 451. |
@@ -52,13 +52,14 @@ Cloudflare, ресурсами VK Cloud CDN и Yandex Cloud CDN, Remnawave и м
 | Playbook | Цели | Назначение | Старт |
 | --- | --- | --- | --- |
 | <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `bootstrap.yml` | `all` | Обновляет ОС, ставит Docker/Speedtest, настраивает swap, sysctl/BBR, zsh, MOTD и SSH; reboot не выполняет. | `ansible-playbook playbook/bootstrap.yml --limit node_pl1` |
-| <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `remnanode.yml` | `docker_nodes` | Устанавливает стандартный Compose-стек RemnaNode в `/opt/remnanode`. | `ansible-playbook playbook/remnanode.yml --limit node_pl1` |
+| <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `remnanode.yml` | `docker_nodes` | Получает `SECRET_KEY` через API панели и устанавливает Compose-стек RemnaNode в `/opt/remnanode`. | `ansible-playbook playbook/remnanode.yml --limit node_pl1` |
+| <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `remnawave_nodes.yml` | `docker_nodes` | Создаёт или обновляет ноды в панели, добавляет стандартный inbound `VLESS_GRPC_REALITY_V2` и ждёт подключения. | `ansible-playbook playbook/remnawave_nodes.yml --limit node_pl1` |
 | <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `ufw.yml` | `docker_nodes` | Настраивает SSH, клиентские порты и доступ панели к API, затем включает `deny incoming`. | `ansible-playbook playbook/ufw.yml --limit node_pl1` |
 | <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `monitoring.yml` | `all` | Разворачивает cAdvisor, node_exporter, vmagent и timer Speedtest. | `ansible-playbook playbook/monitoring.yml --limit node_pl1` |
 | <img src="docs/assets/risk-safe.svg" width="16" height="16" alt="обычная операция"> `reporting.yml` | `all` | Собирает инвентарь и Speedtest, обновляет Google Sheets. | `ansible-playbook playbook/reporting.yml` |
 | <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `update_remnanode.yml` | `docker_nodes` | Последовательно обновляет Compose-образы; партия по умолчанию — 3 ноды. | `ansible-playbook playbook/update_remnanode.yml --limit node_pl1 -e batch_size=1` |
 | <img src="docs/assets/risk-careful.svg" width="16" height="16" alt="предпросмотр"> `multitest.yml` | `docker_nodes` | Нагрузочный CPU/disk/network-тест одной ноды; отчёт сохраняется в `reports/multitest/`. | `ansible-playbook playbook/multitest.yml --limit node_pl1` |
-| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `site.yml` | `all` | Полный конвейер: bootstrap → RemnaNode → UFW → monitoring → reporting. | `ansible-playbook playbook/site.yml --limit node_pl1` |
+| <img src="docs/assets/risk-impact.svg" width="16" height="16" alt="заметное изменение"> `site.yml` | `all` | Полный конвейер: bootstrap → RemnaNode → UFW → регистрация в Remnawave → monitoring → reporting. | `ansible-playbook playbook/site.yml --limit node_pl1` |
 
 ### CDN, xHTTP и Remnawave
 
@@ -143,6 +144,7 @@ docker_nodes:
       ansible_host: 203.0.113.21
       ansible_user: root
       monitoring_instance_name: node_pl1
+      remnawave_node_country_code: PL
       speedtest_provider: ookla
       domain: origin.example.com, front.example.com
       ufw_client_ports_override:
@@ -159,6 +161,13 @@ eu_nodes:
 До выпуска сертификата origin-домен должен резолвиться на ноду, а `80` и `443`
 должны быть свободны и доступны извне.
 
+При регистрации в Remnawave имя по умолчанию равно `inventory_hostname`, адрес —
+`ansible_host`, порт — `21412`, а стандартный inbound —
+`VLESS_GRPC_REALITY_V2`. При необходимости переопределите
+`remnawave_node_name`, `remnawave_node_address`, `remnawave_node_port`,
+`remnawave_node_country_code` или `remnawave_node_default_inbound_tag` в
+`host_vars`/inventory.
+
 ## Секреты и локальные файлы
 
 Все пути ниже намеренно находятся в игнорируемом `playbook/secrets/`. Не
@@ -166,8 +175,7 @@ eu_nodes:
 
 | Интеграция | Файл / источник | Обязательные значения |
 | --- | --- | --- |
-| RemnaNode | `remnanode_secret_key` | Секретный ключ ноды Remnawave. |
-| Remnawave API | `remnawave_token` | Bearer-токен панели для синхронизации CDN-пула. |
+| RemnaNode + Remnawave API | `remnawave_token` | Bearer-токен панели со scope `keygen:get`, доступом к нодам и config profiles; используется при первой выдаче ключа, регистрации нод и синхронизации CDN-пула. |
 | vmagent | `vmagent.yml` | `vmagent_remote_write_url`, `vmagent_remote_write_username`, `vmagent_remote_write_password`. |
 | Google Sheets | `google_sheet_id`, `google_credentials.json` | ID таблицы и JSON service account. Переменные окружения `GOOGLE_SHEET_ID` и `GOOGLE_CREDENTIALS_FILE` могут заменить файлы. |
 | Cloudflare + CDN | `.env` | Для VK нужны OpenStack-параметры, для Yandex — `yc` CLI и `YANDEX_FOLDER_ID`; обоим нужен Cloudflare token с Zone Read/DNS Write. |
@@ -206,18 +214,35 @@ python3 -m venv .venv
 | Playbook | Цели | Что делает | Пример запуска |
 | --- | --- | --- | --- |
 | `bootstrap.yml` | `all` | Базовая подготовка ОС и Docker. Не перезагружает сервер, но сообщает о необходимости reboot. | `ansible-playbook playbook/bootstrap.yml --limit node_pl1` |
-| `remnanode.yml` | `docker_nodes` | Устанавливает стандартный RemnaNode в `/opt/remnanode`. | `ansible-playbook playbook/remnanode.yml --limit docker_nodes` |
+| `remnanode.yml` | `docker_nodes` | Получает `SECRET_KEY` через API и устанавливает стандартный RemnaNode в `/opt/remnanode`. | `ansible-playbook playbook/remnanode.yml --limit docker_nodes` |
+| `remnawave_nodes.yml` | `docker_nodes` | Идемпотентно создаёт/обновляет ноды в панели и активирует стандартный inbound. | `ansible-playbook playbook/remnawave_nodes.yml --limit node_pl1` |
 | `ufw.yml` | `docker_nodes` | Настраивает SSH, клиентские порты и доступ панели к `NODE_PORT`; включает `deny incoming`. | `ansible-playbook playbook/ufw.yml --limit node_pl1` |
 | `monitoring.yml` | `all` | Разворачивает cAdvisor, node_exporter, vmagent и timer speedtest. | `ansible-playbook playbook/monitoring.yml --limit node_pl1` |
 | `reporting.yml` | `all` | Собирает инвентарь и speedtest в Google Sheets; вкладка по умолчанию `ansible_inventory`. | `ansible-playbook playbook/reporting.yml` |
 | `update_remnanode.yml` | `docker_nodes` | Последовательно обновляет Compose-образы. По умолчанию партия — 3 ноды. | `ansible-playbook playbook/update_remnanode.yml -e batch_size=1` |
 | `multitest.yml` | `docker_nodes` | Нагрузочный тест строго по одной ноде; копирует отчёты в `reports/multitest/`. | `ansible-playbook playbook/multitest.yml --limit node_pl1` |
-| `site.yml` | `all` | Полный конвейер: bootstrap → RemnaNode → UFW → monitoring → reporting. | `ansible-playbook playbook/site.yml` |
+| `site.yml` | `all` | Полный конвейер: bootstrap → RemnaNode → UFW → регистрация в Remnawave → monitoring → reporting. | `ansible-playbook playbook/site.yml` |
 
 ### RemnaNode
 
-Playbook устанавливает единый стандартный стек RemnaNode. Для подключения ноды
-требуется файл `playbook/secrets/remnanode_secret_key`.
+Playbook устанавливает единый стандартный стек RemnaNode. При первой установке
+`SECRET_KEY` запрашивается у панели через `GET /api/keygen` с Bearer-токеном из
+`playbook/secrets/remnawave_token`, после чего сохраняется на целевой ноде в
+`/opt/remnanode/.secret_key` с правами `0600`. Повторные запуски используют
+сохранённый ключ: `/api/keygen` каждый раз выпускает новый node-сертификат и не
+должен вызываться без необходимости. Старые установки автоматически переносят
+ключ из существующего Compose. Сам `POST /api/nodes` отвечает только за создание
+записи ноды и ключ не возвращает.
+
+После развёртывания контейнера зарегистрируйте ноду в панели отдельным playbook:
+
+```bash
+ansible-playbook playbook/remnawave_nodes.yml --limit node_pl1
+```
+
+Повторный запуск не создаёт дубликат: нода ищется по имени, её существующие
+inbound'ы сохраняются, а `VLESS_GRPC_REALITY_V2` добавляется при отсутствии.
+`site.yml` выполняет эту синхронизацию автоматически после настройки UFW.
 Обновление без удаления неиспользуемых Docker-образов:
 
 ```bash

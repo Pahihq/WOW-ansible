@@ -1,0 +1,215 @@
+---
+# Идемпотентно создаёт или обновляет ноду в Remnawave.
+# Существующие активные inbound'ы сохраняются; стандартный inbound добавляется.
+
+- name: Проверка параметров регистрируемой ноды
+  ansible.builtin.assert:
+    that:
+      - remnawave_node_name | length >= 3
+      - remnawave_node_address | length >= 2
+      - remnawave_node_port | int >= 1
+      - remnawave_node_port | int <= 65535
+      - remnawave_node_country_code | length == 2
+      - remnawave_node_default_inbound_tag | length > 0
+    fail_msg: >-
+      Проверь remnawave_node_name, remnawave_node_address,
+      remnawave_node_port, remnawave_node_country_code и
+      remnawave_node_default_inbound_tag для {{ inventory_hostname }}.
+
+- name: Получение inbound'ов конфигурационных профилей
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/config-profiles/inbounds"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+    status_code: [200]
+  register: rw_node_inbounds_response
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Поиск стандартного inbound по тегу
+  ansible.builtin.set_fact:
+    rw_node_target_inbounds: >-
+      {{ rw_node_inbounds_response.json.response.inbounds
+         | selectattr('tag', 'equalto', remnawave_node_default_inbound_tag)
+         | list }}
+
+- name: Проверка однозначности стандартного inbound
+  ansible.builtin.assert:
+    that:
+      - rw_node_target_inbounds | length == 1
+    fail_msg: >-
+      В панели найдено {{ rw_node_target_inbounds | length }} inbound'ов
+      с тегом {{ remnawave_node_default_inbound_tag }}; нужен ровно один.
+
+- name: Сохранение стандартного inbound и его профиля
+  ansible.builtin.set_fact:
+    rw_node_target_inbound: "{{ rw_node_target_inbounds | first }}"
+
+- name: Получение списка нод Remnawave
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+    status_code: [200]
+  register: rw_nodes_response
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Поиск ноды по имени из inventory
+  ansible.builtin.set_fact:
+    rw_matching_nodes: >-
+      {{ rw_nodes_response.json.response
+         | selectattr('name', 'equalto', remnawave_node_name)
+         | list }}
+
+- name: Проверка уникальности имени ноды
+  ansible.builtin.assert:
+    that:
+      - rw_matching_nodes | length <= 1
+    fail_msg: >-
+      В Remnawave найдено несколько нод с именем {{ remnawave_node_name }}.
+      Удали дубликаты или задай уникальное remnawave_node_name.
+
+- name: Сохранение существующей ноды
+  ansible.builtin.set_fact:
+    rw_existing_node: "{{ (rw_matching_nodes | first) | default({}, true) }}"
+
+- name: Проверка профиля существующей ноды
+  ansible.builtin.assert:
+    that:
+      - >-
+        (rw_existing_node.configProfile.activeConfigProfileUuid | default('', true))
+        in ['', rw_node_target_inbound.profileUuid]
+    fail_msg: >-
+      Нода {{ remnawave_node_name }} уже использует другой конфигурационный
+      профиль. Автоматическая смена профиля остановлена, чтобы не удалить
+      работающие inbound'ы.
+  when: rw_existing_node.uuid is defined
+
+- name: Расчёт активных inbound'ов и тегов ноды
+  ansible.builtin.set_fact:
+    rw_node_existing_inbound_uuids: >-
+      {{ (rw_existing_node.configProfile.activeInbounds
+          | default([], true)
+          | map(attribute='uuid')
+          | list)
+         if rw_existing_node.uuid is defined else [] }}
+    rw_node_desired_tags: >-
+      {{ ((rw_existing_node.tags | default([], true)) + remnawave_node_tags)
+         | unique | list }}
+
+- name: Сборка целевого состояния ноды
+  ansible.builtin.set_fact:
+    rw_node_desired_inbound_uuids: >-
+      {{ (rw_node_existing_inbound_uuids + [rw_node_target_inbound.uuid])
+         | unique | list }}
+    rw_node_body:
+      name: "{{ remnawave_node_name }}"
+      address: "{{ remnawave_node_address }}"
+      port: "{{ remnawave_node_port | int }}"
+      countryCode: "{{ remnawave_node_country_code | upper }}"
+      tags: "{{ rw_node_desired_tags }}"
+      configProfile:
+        activeConfigProfileUuid: "{{ rw_node_target_inbound.profileUuid }}"
+        activeInbounds: >-
+          {{ (rw_node_existing_inbound_uuids + [rw_node_target_inbound.uuid])
+             | unique | list }}
+
+- name: Создание отсутствующей ноды в Remnawave
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes"
+    method: POST
+    headers: "{{ remnawave_headers }}"
+    body_format: json
+    body: "{{ rw_node_body }}"
+    return_content: true
+    status_code: [200, 201]
+  register: rw_node_created
+  delegate_to: localhost
+  become: false
+  changed_when: true
+  when: rw_existing_node.uuid is not defined
+
+- name: Определение необходимости обновления существующей ноды
+  ansible.builtin.set_fact:
+    rw_node_needs_update: >-
+      {{ rw_existing_node.uuid is defined and (
+           rw_existing_node.address != remnawave_node_address
+           or (rw_existing_node.port | int) != (remnawave_node_port | int)
+           or rw_existing_node.countryCode != (remnawave_node_country_code | upper)
+           or (rw_existing_node.tags | default([]) | sort) != (rw_node_desired_tags | sort)
+           or (rw_existing_node.configProfile.activeConfigProfileUuid | default('', true))
+              != rw_node_target_inbound.profileUuid
+           or (rw_node_existing_inbound_uuids | sort)
+              != (rw_node_desired_inbound_uuids | sort)
+         ) }}
+
+- name: Обновление существующей ноды до целевого состояния
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes"
+    method: PATCH
+    headers: "{{ remnawave_headers }}"
+    body_format: json
+    body: "{{ rw_node_body | combine({'uuid': rw_existing_node.uuid}) }}"
+    return_content: true
+    status_code: [200]
+  register: rw_node_updated
+  delegate_to: localhost
+  become: false
+  changed_when: true
+  when: rw_node_needs_update | bool
+
+- name: Сохранение UUID зарегистрированной ноды
+  ansible.builtin.set_fact:
+    remnawave_node_uuid: >-
+      {{ rw_node_created.json.response.uuid
+         if rw_existing_node.uuid is not defined
+         else rw_existing_node.uuid }}
+
+- name: Получение итогового состояния ноды
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes/{{ remnawave_node_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+    status_code: [200]
+  register: rw_node_final
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Включение выключенной ноды
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes/{{ remnawave_node_uuid }}/actions/enable"
+    method: POST
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+    status_code: [200]
+  register: rw_node_enabled
+  delegate_to: localhost
+  become: false
+  changed_when: true
+  when: rw_node_final.json.response.isDisabled | bool
+
+- name: Ожидание подключения RemnaNode к панели
+  ansible.builtin.uri:
+    url: "{{ remnawave_base_url }}/api/nodes/{{ remnawave_node_uuid }}"
+    headers: "{{ remnawave_headers }}"
+    return_content: true
+    status_code: [200]
+  register: rw_node_connection
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  until: rw_node_connection.json.response.isConnected | bool
+  retries: "{{ remnawave_node_wait_retries }}"
+  delay: "{{ remnawave_node_wait_delay }}"
+  when: remnawave_node_wait_connected | bool
+
+- name: Итог регистрации ноды
+  ansible.builtin.debug:
+    msg: >-
+      {{ remnawave_node_name }} зарегистрирована как {{ remnawave_node_uuid }};
+      inbound {{ remnawave_node_default_inbound_tag }} активен,
+      адрес {{ remnawave_node_address }}:{{ remnawave_node_port }}.

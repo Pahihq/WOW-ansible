@@ -36,6 +36,9 @@
 - name: Настроить межсетевой экран
   ansible.builtin.import_playbook: ufw.yml
 
+- name: Зарегистрировать VPN-ноды в Remnawave
+  ansible.builtin.import_playbook: remnawave_nodes.yml
+
 - name: Настроить стек мониторинга
   ansible.builtin.import_playbook: monitoring.yml
 
