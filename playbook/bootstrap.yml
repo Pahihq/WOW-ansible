@@ -499,6 +499,12 @@
     zshrc_source_file: "files/.zshrc"
     p10k_source_file: "files/.p10k.zsh"
 
+    zsh_git_environment:
+      GIT_TERMINAL_PROMPT: "0"
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: http.version
+      GIT_CONFIG_VALUE_0: HTTP/1.1
+
     p10k_themes:
       - name: Arctic Blue
         ok_background: 33
@@ -605,6 +611,7 @@
         depth: 1
         update: false
         force: false
+      environment: "{{ zsh_git_environment }}"
       when: not ohmyzsh_dir.stat.exists
 
     - name: Пропустить существующий каталог oh-my-zsh, отличный от git.
@@ -639,6 +646,7 @@
         depth: 1
         update: false
         force: false
+      environment: "{{ zsh_git_environment }}"
       loop: "{{ zsh_git_component_stats.results }}"
       loop_control:
         label: "{{ item.item.name }}"

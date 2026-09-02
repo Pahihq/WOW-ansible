@@ -97,6 +97,7 @@
     - name: Установить имя хоста из имени экземпляра мониторинга
       ansible.builtin.hostname:
         name: "{{ system_hostname }}"
+        use: debian
 
     # hostname(1) меняет /etc/hostname, но не добавляет локальную запись.
     # Без неё sudo и systemd-resolved могут не разрешить собственное имя хоста.

@@ -123,7 +123,10 @@
     method: POST
     headers: "{{ remnawave_headers }}"
     body_format: json
-    body: "{{ rw_node_body }}"
+    body: >-
+      {{ rw_node_body
+         | combine({'port': (remnawave_node_port | int)})
+         | to_json }}
     return_content: true
     status_code: [200, 201]
   register: rw_node_created
@@ -152,7 +155,13 @@
     method: PATCH
     headers: "{{ remnawave_headers }}"
     body_format: json
-    body: "{{ rw_node_body | combine({'uuid': rw_existing_node.uuid}) }}"
+    body: >-
+      {{ rw_node_body
+         | combine({
+             'uuid': rw_existing_node.uuid,
+             'port': (remnawave_node_port | int)
+           })
+         | to_json }}
     return_content: true
     status_code: [200]
   register: rw_node_updated
