@@ -108,7 +108,16 @@
         owner: root
         group: root
         mode: "0644"
-      notify: Сгенерировать локаль en_US.UTF-8
+
+    - name: Дебиан/Убунту | Получить список сгенерированных локалей
+      ansible.builtin.command: locale -a
+      register: generated_locales
+      changed_when: false
+
+    - name: Дебиан/Убунту | Сгенерировать локаль en_US.UTF-8
+      ansible.builtin.command: locale-gen en_US.UTF-8
+      changed_when: true
+      when: "'en_us.utf8' not in (generated_locales.stdout_lines | map('lower') | list)"
 
     - name: Дебиан/Убунту | Проверить текущую локаль по умолчанию
       ansible.builtin.command: awk -F= '$1 == "LANG" { gsub(/"/, "", $2); print $2 }' /etc/default/locale
@@ -120,11 +129,6 @@
       ansible.builtin.command: update-locale LANG=en_US.UTF-8
       changed_when: true
       when: default_locale_check.stdout != 'en_US.UTF-8'
-
-  handlers:
-    - name: Сгенерировать локаль en_US.UTF-8
-      ansible.builtin.command: locale-gen en_US.UTF-8
-      changed_when: true
 
 - name: Установите Docker Engine для хостов RemnaNode.
   hosts: all
