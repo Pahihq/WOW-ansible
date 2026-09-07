@@ -18,6 +18,16 @@
     # Гасить ли прошлое плечо ноды по завершении: при авторотации — да,
     # при ручном запуске старое плечо остаётся включённым, снимаешь сам.
     cdn_retire_previous: "{{ auto_trigger | bool }}"
+  pre_tasks:
+    - name: Нода исключена из ротации CDN
+      ansible.builtin.assert:
+        that: not (cdn_rotation_excluded | default(false) | bool)
+        fail_msg: >-
+          {{ inventory_hostname }} исключена из ротации CDN (cdn_rotation_excluded в inventory).
+          На ней Reality-selfsteal и :443 занят xray — роль xhttp_origin поставит туда свой
+          nginx и сломает и декой, и живой CDN-фронт ноды.
+        quiet: true
+
   roles:
     - role: remnawave
   tasks:
