@@ -1,0 +1,15 @@
+---
+# Доступ к панели для регистрации обычных RemnaNode.
+remnawave_base_url: "https://panel.wowsecure.ru"
+remnawave_token_file: "{{ playbook_dir }}/secrets/remnawave_token"
+
+remnawave_node_name: "{{ inventory_hostname }}"
+remnawave_node_address: "{{ ansible_host | default(inventory_hostname) }}"
+remnawave_node_port: "{{ remnanode_api_port | default(21412) }}"
+remnawave_node_country_code: "XX"
+remnawave_node_default_inbound_tag: "VLESS_GRPC_REALITY_V2"
+remnawave_node_tags:
+  - ANSIBLE
+remnawave_node_wait_connected: true
+remnawave_node_wait_retries: 12
+remnawave_node_wait_delay: 5

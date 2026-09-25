@@ -2,15 +2,22 @@
 inventory.yml
 inventory.yaml
 !tests/inventory.yml
+!CDN/inventory.yml
+!ansible/tests/inventory.yml
+!CDN/tests/inventory.yml
 host_vars/
 group_vars/docker_nodes.yml
+ansible/group_vars/docker_nodes.yml
 *.local.yml
 *.local.yaml
 !*.example
 
 # Secrets
 playbook/secrets/
+ansible/playbook/secrets/
+CDN/playbook/secrets/
 playbook/scripts/.env
+CDN/playbook/scripts/.env
 *.vault
 *.vault.yml
 *.vault.yaml
@@ -34,6 +41,7 @@ temp/
 # Local recovery copies and CDN runtime state
 *.bak.*
 playbook/state/
+CDN/playbook/state/
 
 # Python cache and virtual environments
 __pycache__/

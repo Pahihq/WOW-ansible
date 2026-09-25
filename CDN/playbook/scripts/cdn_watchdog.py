@@ -14,7 +14,7 @@ SSL-ошибкой, пока VK-edge выпускает сертификат, и
 import argparse, fcntl, json, os, re, subprocess, sys, time, urllib.request
 from datetime import datetime, timezone
 
-ANSIBLE_DIR = '/root/ansible'
+ANSIBLE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PLAYBOOK_DIR = os.path.join(ANSIBLE_DIR, 'playbook')
 STATE_DIR = os.path.join(PLAYBOOK_DIR, 'state')
 WD_STATE = os.path.join(STATE_DIR, '.watchdog.json')

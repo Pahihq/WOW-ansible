@@ -2,8 +2,9 @@
 """Ищет A-записи брошенных ротаций: те, что не упомянуты ни в одном файле состояния."""
 import json, os, sys, urllib.request
 
-ENV = '/root/ansible/playbook/secrets/.env'
-STATE = '/root/ansible/playbook/state'
+PLAYBOOK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENV = os.path.join(PLAYBOOK_DIR, 'secrets', '.env')
+STATE = os.path.join(PLAYBOOK_DIR, 'state')
 tok = None
 for line in open(ENV):
     if line.startswith('CLOUDFLARE_API_TOKEN='):
