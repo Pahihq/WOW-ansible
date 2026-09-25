@@ -32,17 +32,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install ansible-core ansible-lint
-          ansible-galaxy collection install -r requirements.yml
+          ansible-galaxy collection install -r ansible/requirements.yml
 
-      - name: Lint playbooks and roles
-        run: ansible-lint
+      - name: Create local inventory for the CDN symlink
+        run: cp ansible/inventory.yml.example ansible/inventory.yml
 
-      - name: Check syntax of every playbook
+      - name: Lint both projects
         run: |
-          find playbook -maxdepth 1 -type f -name '*.yml' -print0 | sort -z |
-            xargs -0 -n 1 ansible-playbook \
-              --inventory tests/inventory.yml \
-              --syntax-check
+          (cd ansible && ansible-lint)
+          (cd CDN && ansible-lint)
+
+      - name: Check syntax of every playbook in both projects
+        run: |
+          for project in ansible CDN; do
+            (
+              cd "$project"
+              find playbook -maxdepth 1 -type f -name '*.yml' -print0 | sort -z |
+                xargs -0 -n 1 ansible-playbook \
+                  --inventory tests/inventory.yml \
+                  --syntax-check
+            )
+          done
 
       - name: Notify Telegram
         if: ${{ always() && github.event_name == 'push' }}
