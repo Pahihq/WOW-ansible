@@ -39,7 +39,7 @@ Origin-протокол всегда MATCH. CNAME и Let's Encrypt настра�
 Переменные окружения:
   VKCS_CONFIG_PATH          Путь к .env (по умолчанию .env в текущем каталоге)
   VKCS_OPENRC_FILE          Путь к OpenStack RC file v3 (относительный — от .env)
-  VKCS_API_PROXY            Необязательный SOCKS5-прокси для запросов VK/Cloudflare
+  VKCS_API_PROXY            Необязательный SOCKS5-прокси для запросов VK
   OS_PASSWORD               Пароль OpenStack (обязательно задаётся в .env)
   CLOUDFLARE_ACCOUNT_ID     ID аккаунта Cloudflare
   CLOUDFLARE_API_TOKEN      Account-owned API token Cloudflare
@@ -282,6 +282,7 @@ http_request() {
       args+=(--header "X-Auth-Token: $VKCS_TOKEN")
       ;;
     cloudflare)
+      args+=(--noproxy api.cloudflare.com)
       args+=(--header "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
       ;;
     *)
