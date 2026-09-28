@@ -39,6 +39,7 @@ Origin-протокол всегда MATCH. CNAME и Let's Encrypt настра�
 Переменные окружения:
   VKCS_CONFIG_PATH          Путь к .env (по умолчанию .env в текущем каталоге)
   VKCS_OPENRC_FILE          Путь к OpenStack RC file v3 (относительный — от .env)
+  VKCS_API_PROXY            Необязательный SOCKS5-прокси для запросов VK/Cloudflare
   OS_PASSWORD               Пароль OpenStack (обязательно задаётся в .env)
   CLOUDFLARE_ACCOUNT_ID     ID аккаунта Cloudflare
   CLOUDFLARE_API_TOKEN      Account-owned API token Cloudflare
@@ -83,6 +84,11 @@ load_saved_config() {
     source "$CONFIG_PATH"
     set +a
     log "Настройки загружены из $CONFIG_PATH"
+  fi
+  if [[ -n "${VKCS_API_PROXY:-}" ]]; then
+    export https_proxy="$VKCS_API_PROXY" HTTPS_PROXY="$VKCS_API_PROXY"
+    export all_proxy="$VKCS_API_PROXY" ALL_PROXY="$VKCS_API_PROXY"
+    export no_proxy='' NO_PROXY=''
   fi
 }
 
@@ -188,19 +194,27 @@ authenticate_vk() {
     }')
 
   log "Получаю временный токен и каталог сервисов VK Cloud"
-  http_code=$(curl \
+  local attempt=1
+  while ! http_code=$(curl \
     --silent \
     --show-error \
     --request POST \
     --output "$body_file" \
     --dump-header "$headers_file" \
     --write-out '%{http_code}' \
-    --connect-timeout 20 \
+    --connect-timeout 10 \
     --max-time 120 \
     --header 'Accept: application/json' \
     --header 'Content-Type: application/json' \
     --data "$payload" \
-    "$auth_url") || die "Сетевая ошибка при аутентификации VK Cloud"
+    "$auth_url"); do
+    if ((attempt >= 3)); then
+      die "Сетевая ошибка при аутентификации VK Cloud после $attempt попыток"
+    fi
+    warn "Повторяю получение токена VK после сетевой ошибки (попытка $((attempt + 1))/3)"
+    sleep "$attempt"
+    ((attempt += 1))
+  done
 
   LAST_HTTP_CODE=$http_code
   LAST_HTTP_BODY=$(<"$body_file")
@@ -241,7 +255,15 @@ http_request() {
   local auth=$3
   local data=${4:-}
   local body_file="$TMP_DIR/response.json"
+  local connect_timeout=20
+  local max_attempts=1
+  local attempt=1
   local -a args
+
+  if [[ "$method" == GET ]]; then
+    connect_timeout=10
+    max_attempts=3
+  fi
 
   args=(
     --silent
@@ -250,7 +272,7 @@ http_request() {
     --request "$method"
     --output "$body_file"
     --write-out '%{http_code}'
-    --connect-timeout 20
+    --connect-timeout "$connect_timeout"
     --max-time 120
     --header 'Accept: application/json'
   )
@@ -274,8 +296,14 @@ http_request() {
     )
   fi
 
-  LAST_HTTP_CODE=$(curl "${args[@]}" "$url") ||
-    die "Сетевая ошибка при обращении к $url"
+  while ! LAST_HTTP_CODE=$(curl "${args[@]}" "$url"); do
+    if ((attempt >= max_attempts)); then
+      die "Сетевая ошибка при обращении к $url после $attempt попыток"
+    fi
+    warn "Повторяю GET $url после сетевой ошибки (попытка $((attempt + 1))/$max_attempts)"
+    sleep "$attempt"
+    ((attempt += 1))
+  done
   LAST_HTTP_BODY=$(<"$body_file")
 }
 
