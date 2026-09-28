@@ -38,7 +38,7 @@ Origin-протокол всегда MATCH. CNAME и Let's Encrypt настра�
 
 Переменные окружения:
   VKCS_CONFIG_PATH          Путь к .env (по умолчанию .env в текущем каталоге)
-  VKCS_OPENRC_FILE          Путь к OpenStack RC file v3
+  VKCS_OPENRC_FILE          Путь к OpenStack RC file v3 (относительный — от .env)
   OS_PASSWORD               Пароль OpenStack (обязательно задаётся в .env)
   CLOUDFLARE_ACCOUNT_ID     ID аккаунта Cloudflare
   CLOUDFLARE_API_TOKEN      Account-owned API token Cloudflare
@@ -107,14 +107,24 @@ load_openrc() {
 
   require_env VKCS_OPENRC_FILE
   require_env OS_PASSWORD
-  [[ -f "$VKCS_OPENRC_FILE" ]] || die "OpenStack RC file не найден: $VKCS_OPENRC_FILE"
+  local openrc_file=$VKCS_OPENRC_FILE
+  local config_dir
+  config_dir=$(dirname -- "$CONFIG_PATH")
+  if [[ "$openrc_file" != /* ]]; then
+    openrc_file="$config_dir/$openrc_file"
+  elif [[ ! -f "$openrc_file" && -f "$config_dir/${openrc_file##*/}" ]]; then
+    # После переноса secrets/ старый абсолютный путь в .env может устареть.
+    warn "RC-файл не найден по $openrc_file; использую файл рядом с .env"
+    openrc_file="$config_dir/${openrc_file##*/}"
+  fi
+  [[ -f "$openrc_file" ]] || die "OpenStack RC file не найден: $openrc_file"
 
-  log "Загружаю OpenStack RC file: $VKCS_OPENRC_FILE"
+  log "Загружаю OpenStack RC file: $openrc_file"
   set +u
   # shellcheck disable=SC1090
   # Horizon RC-файлы могут безусловно запрашивать пароль через read. Передаём
   # сохранённый OS_PASSWORD на stdin, чтобы запуск оставался неинтерактивным.
-  source "$VKCS_OPENRC_FILE" <<<"$OS_PASSWORD" >/dev/null
+  source "$openrc_file" <<<"$OS_PASSWORD" >/dev/null
   set -u
 
   require_env OS_AUTH_URL

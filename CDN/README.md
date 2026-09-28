@@ -8,6 +8,8 @@
 
 Создайте `playbook/secrets/` и заполните нужные файлы: `.env` по `playbook/scripts/.env.example` для Cloudflare/VK/Yandex, `remnawave_token`, `kuma.env`, `telegram.env`. Если ранее использовались `playbook/state/` и секреты в старом корне репозитория, перенесите их сюда до боевой ротации. Состояние ротации необходимо для корректного продолжения и снятия прежних ресурсов. Оба каталога исключены из Git.
 
+Для VK положите OpenStack RC-файл рядом с `playbook/secrets/.env` и задайте `VKCS_OPENRC_FILE` его именем, например `mcs7079315073-openrc.sh`. Относительный путь отсчитывается от `.env`. Старый абсолютный путь тоже сработает после переноса, если файл с тем же именем находится рядом с `.env`.
+
 Для Kuma нужен Python с `python-socketio[client]` в `.venv/`; для Yandex — настроенный `yc` CLI. Установите коллекции из `requirements.yml`.
 
 ## Запуск

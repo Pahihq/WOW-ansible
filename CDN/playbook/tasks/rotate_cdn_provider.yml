@@ -14,9 +14,6 @@
   environment:
     VKCS_CONFIG_PATH: "{{ cdn_provider_env_file }}"
     YANDEX_CONFIG_PATH: "{{ cdn_provider_env_file }}"
-    ALL_PROXY: "{{ cdn_api_proxy | default('') }}"
-    HTTPS_PROXY: "{{ cdn_api_proxy_go | default('') }}"
-    HTTP_PROXY: "{{ cdn_api_proxy_go | default('') }}"
   register: cdn_setup_result
   delegate_to: localhost
   become: false
@@ -33,9 +30,6 @@
   environment:
     VKCS_CONFIG_PATH: "{{ cdn_provider_env_file }}"
     YANDEX_CONFIG_PATH: "{{ cdn_provider_env_file }}"
-    ALL_PROXY: "{{ cdn_api_proxy | default('') }}"
-    HTTPS_PROXY: "{{ cdn_api_proxy_go | default('') }}"
-    HTTP_PROXY: "{{ cdn_api_proxy_go | default('') }}"
   register: cdn_provider_state
   delegate_to: localhost
   become: false
