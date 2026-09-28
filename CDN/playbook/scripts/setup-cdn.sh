@@ -255,27 +255,26 @@ http_request() {
   local auth=$3
   local data=${4:-}
   local body_file="$TMP_DIR/response.json"
-  local connect_timeout=20
-  local max_attempts=1
+  local connect_timeout=10
+  local max_attempts=3
   local attempt=1
+  local curl_meta tls_time retry_allowed
   local -a args
-
-  if [[ "$method" == GET ]]; then
-    connect_timeout=10
-    max_attempts=3
-  fi
 
   args=(
     --silent
     --show-error
-    --location
     --request "$method"
     --output "$body_file"
-    --write-out '%{http_code}'
+    --write-out '%{http_code}|%{time_appconnect}'
     --connect-timeout "$connect_timeout"
     --max-time 120
     --header 'Accept: application/json'
   )
+
+  if [[ "$method" == GET ]]; then
+    args+=(--location)
+  fi
 
   case "$auth" in
     vk)
@@ -297,11 +296,27 @@ http_request() {
     )
   fi
 
-  while ! LAST_HTTP_CODE=$(curl "${args[@]}" "$url"); do
-    if ((attempt >= max_attempts)); then
+  while true; do
+    if curl_meta=$(curl "${args[@]}" "$url"); then
+      LAST_HTTP_CODE=${curl_meta%%|*}
+      break
+    fi
+
+    # До TLS-рукопожатия HTTP-запрос ещё не отправлен: повтор безопасен
+    # даже для POST/DELETE. После рукопожатия повторяем только GET.
+    retry_allowed=false
+    if [[ "$method" == GET ]]; then
+      retry_allowed=true
+    elif [[ "$curl_meta" == *'|'* ]]; then
+      tls_time=${curl_meta#*|}
+      if [[ "$tls_time" =~ ^0([.]0+)?$ ]]; then
+        retry_allowed=true
+      fi
+    fi
+    if ((attempt >= max_attempts)) || [[ "$retry_allowed" != true ]]; then
       die "Сетевая ошибка при обращении к $url после $attempt попыток"
     fi
-    warn "Повторяю GET $url после сетевой ошибки (попытка $((attempt + 1))/$max_attempts)"
+    warn "Повторяю $method $url после сетевой ошибки (попытка $((attempt + 1))/$max_attempts)"
     sleep "$attempt"
     ((attempt += 1))
   done
