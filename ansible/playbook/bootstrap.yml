@@ -926,6 +926,14 @@
           LoginGraceTime 30
       notify: Перезапустить службу SSH
 
+    - name: Создать каталог разделения привилегий sshd
+      ansible.builtin.file:
+        path: /run/sshd
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
     - name: Проверьте конфигурацию sshd
       ansible.builtin.command: sshd -t
       changed_when: false
