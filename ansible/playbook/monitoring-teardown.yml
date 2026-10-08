@@ -1,0 +1,66 @@
+---
+- name: Удалить стек мониторинга | cAdvisor, node_exporter, vmagent
+  hosts: all
+  become: true
+
+  vars:
+    monitoring_base_dir: /opt/monitoring
+    node_exporter_textfile_dir: /var/lib/node_exporter/textfile_collector
+    speedtest_metrics_script: /usr/local/bin/speedtest_metrics.sh
+    monitoring_install_tmp_dirs:
+      - /tmp/node_exporter_install
+      - /tmp/vmagent_install
+    monitoring_units:
+      - cadvisor.service
+      - nodeexporter.service
+      - vmagent.service
+      - speedtest-metrics.service
+      - speedtest-metrics.timer
+
+  tasks:
+    - name: Остановить и отключить каждый сервис мониторинга
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - disable
+          - --now
+          - "{{ item }}"
+      loop: "{{ monitoring_units }}"
+      register: monitoring_systemctl_disable
+      changed_when: false
+      failed_when: monitoring_systemctl_disable.rc not in [0, 1, 5]
+
+    - name: Удалить systemd-юниты мониторинга
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}"
+        state: absent
+      loop: "{{ monitoring_units }}"
+      notify: Перезагрузить конфигурацию systemd
+
+    - name: Удалить установленные файлы, конфигурацию и накопленные метрики
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ monitoring_base_dir }}"
+        - "{{ node_exporter_textfile_dir }}"
+        - "{{ speedtest_metrics_script }}"
+        - /tmp/speedtest_metrics_error.log
+        - "{{ monitoring_install_tmp_dirs[0] }}"
+        - "{{ monitoring_install_tmp_dirs[1] }}"
+
+    - name: Очистить состояние failed для удалённых юнитов
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - reset-failed
+          - "{{ item }}"
+      loop: "{{ monitoring_units }}"
+      register: monitoring_systemctl_reset
+      changed_when: false
+      failed_when: monitoring_systemctl_reset.rc not in [0, 1, 5]
+
+  handlers:
+    - name: Перезагрузить конфигурацию systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
